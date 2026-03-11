@@ -1,0 +1,81 @@
+<!-- filepath: src/scout_nav/launch/scout_lidar_process.launch -->
+<!-- ====================================================================== -->
+<!-- scout_lidar_process.launch — 3D 点云降维为 2D LaserScan                  -->
+<!--                                                                         -->
+<!-- ★ min_height / max_height 计算方法（基于标定后的真实物理数值推导）★       -->
+<!--                                                                         -->
+<!-- 已知标定结果：                                                           -->
+<!--   base_z_offset = 0.182m （base_link 距地面高度）                       -->
+<!--   lidar_z       = 0.54m  （velodyne 距 base_link 高度）                 -->
+<!--   → 雷达中心距地面绝对高度 = 0.182 + 0.54 = 0.722m                     -->
+<!--                                                                         -->
+<!-- pointcloud_to_laserscan 的 min_height / max_height 含义：               -->
+<!--   以 target_frame（base_link）为参考，在 Z 轴方向截取点云切片            -->
+<!--   即相对于 base_link 的 Z 坐标范围                                      -->
+<!--                                                                         -->
+<!-- min_height 计算：                                                       -->
+<!--   地面相对于 base_link 的 Z 高度 = -base_z_offset = -0.182m            -->
+<!--   我们希望切片包含地面附近的点（用于检测矮小障碍物）                     -->
+<!--   但不能切太低（否则包含地面反射噪声）                                   -->
+<!--   → min_height = -base_z_offset + 小余量 = -0.182 + 0.10 = -0.082m    -->
+<!--   即切片下界在 base_link 下方 0.08m 处（离地面 10cm 高的障碍物可检测）   -->
+<!--                                                                         -->
+<!-- max_height 计算：                                                       -->
+<!--   ⚠️ 关键防扫车身逻辑 ⚠️                                               -->
+<!--   雷达在 base_link 上方 lidar_z = 0.54m 处                             -->
+<!--   雷达安装在车顶偏前部（lidar_x = 0.12m），向后方扫描时                 -->
+<!--   激光束可能被车体后部上表面或后方天线/GPS 模块遮挡，产生近距离虚假障碍物 -->
+<!--                                                                         -->
+<!--   解决策略：max_height 不能接近雷达安装 Z 高度                           -->
+<!--   → max_height = lidar_z - 安全裕度 = 0.54 - 0.05 = 0.49m             -->
+<!--   即切片上界在 base_link 上方 0.49m 处                                  -->
+<!--   这确保所有通过的点都低于雷达安装高度，过滤掉车顶反射                   -->
+<!-- ====================================================================== -->
+<launch>
+
+    <node name="pointcloud_to_laserscan"
+          pkg="pointcloud_to_laserscan"
+          type="pointcloud_to_laserscan_node"
+          output="screen">
+
+        <!-- 输入点云话题映射 -->
+        <remap from="cloud_in" to="/velodyne_points" />
+        <!-- 输出 2D LaserScan 话题 -->
+        <remap from="scan" to="/scan" />
+
+        <!-- target_frame: 点云先转换到此坐标系再按 Z 轴裁剪 -->
+        <param name="target_frame"      value="base_link" />
+
+        <!-- min_height: 裁剪下界（相对 base_link 的 Z 值，米） -->
+        <!-- -0.08m = 地面以上约 0.10m（base_link 在地面上方 0.182m） -->
+        <!-- 可检测到 10cm 以上的障碍物（如路沿、小台阶） -->
+        <param name="min_height"        value="-0.08" />
+
+        <!-- max_height: 裁剪上界（相对 base_link 的 Z 值，米） -->
+        <!-- 0.49m = 低于雷达安装点 0.05m，防止扫到车顶结构 -->
+        <param name="max_height"        value="0.49" />
+
+        <!-- 角度范围：完整 360 度 -->
+        <param name="angle_min"         value="-3.14159265359" />
+        <param name="angle_max"         value="3.14159265359" />
+
+        <!-- 角度分辨率：约 0.25°（2π/1440） -->
+        <param name="angle_increment"   value="0.00436332" />
+
+        <!-- 扫描时间：VLP-16 默认 10Hz 旋转，一圈 0.1s -->
+        <param name="scan_time"         value="0.1" />
+
+        <!-- 有效测距范围 -->
+        <param name="range_min"         value="0.2" />
+        <param name="range_max"         value="30.0" />
+
+        <!-- 超出 range_max 的点输出为 inf -->
+        <param name="use_inf"           value="true" />
+        <param name="inf_epsilon"       value="1.0" />
+
+        <!-- 单线程处理（防时间戳乱序） -->
+        <param name="concurrency_level" value="1" />
+
+    </node>
+
+</launch>

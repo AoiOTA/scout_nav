@@ -1,0 +1,149 @@
+<!-- filepath: src/scout_nav/launch/scout_bringup.launch -->
+<!-- ====================================================================== -->
+<!-- scout_bringup.launch — Scout Mini 硬件底层全栈拉起（生产环境）            -->
+<!--                                                                         -->
+<!-- 功能清单：                                                               -->
+<!--   1. 启动 Scout Mini 底盘 CAN 驱动（odom 发布 + TF: odom→base_link）   -->
+<!--   2. 启动 Velodyne VLP-16 雷达驱动（发布 /velodyne_points 3D 点云）     -->
+<!--   3. 解析 Scout Mini 3D URDF 模型并加载到参数服务器                     -->
+<!--   4. 启动 joint_state_publisher（发布车轮虚拟关节状态）                  -->
+<!--   5. 启动 robot_state_publisher（根据 URDF+关节状态发布全部 TF）        -->
+<!--   6. 发布 base_link→velodyne 的静态 TF（全归零占位，标定后替换）        -->
+<!--                                                                         -->
+<!-- ⚠️ 此 launch 中绝不包含 base_footprint！                               -->
+<!--    base_footprint 仅在标定环境（Phase 3）中临时使用                      -->
+<!-- ====================================================================== -->
+<launch>
+
+    <!-- ================================================================== -->
+    <!-- [参数] use_sim_time                                                 -->
+    <!-- false: 实车运行使用系统时钟                                         -->
+    <!-- true:  离线 Rosbag 回放时使用 bag 中的 /clock 时钟                  -->
+    <!-- ================================================================== -->
+    <arg name="use_sim_time" default="false" />
+    <param name="/use_sim_time" value="$(arg use_sim_time)" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 1] Scout Mini 底盘驱动节点                                     -->
+    <!--                                                                     -->
+    <!-- 源码分析（scout_base/launch/scout_base.launch 第 17 行）：           -->
+    <!--   pub_tf 参数的 default 值使用了 $(arg pub_tf)，这会导致              -->
+    <!--   如果不传入 pub_tf 参数就直接 include 会报错：                       -->
+    <!--   "arg 'pub_tf' is not defined"                                     -->
+    <!--   所以我们必须显式传入 pub_tf 参数                                   -->
+    <!--                                                                     -->
+    <!-- 启动后发布：                                                         -->
+    <!--   /odom (nav_msgs/Odometry): 底盘里程计                             -->
+    <!--   /scout_status: 底盘状态（电压、电流、错误码等）                     -->
+    <!--   TF: odom → base_link（当 pub_tf=true 时）                         -->
+    <!--   订阅 /cmd_vel (geometry_msgs/Twist): 接收运动指令                  -->
+    <!-- ================================================================== -->
+    <include file="$(find scout_base)/launch/scout_base.launch">
+        <arg name="port_name"       value="can0" />
+        <arg name="is_scout_mini"   value="true" />
+        <arg name="is_scout_omni"   value="false" />
+        <arg name="simulated_robot" value="false" />
+        <arg name="odom_topic_name" value="odom" />
+        <arg name="pub_tf"          value="true" />
+    </include>
+
+    <!-- ================================================================== -->
+    <!-- [模块 2] Velodyne VLP-16 雷达驱动                                    -->
+    <!--                                                                     -->
+    <!-- VLP16_points.launch 内部启动两个节点：                               -->
+    <!--   velodyne_driver_node: 监听 UDP 2368 端口接收原始雷达数据包         -->
+    <!--   velodyne_convert_node: 将原始数据包转为 PointCloud2                -->
+    <!-- 发布：/velodyne_points (sensor_msgs/PointCloud2)                     -->
+    <!-- 点云坐标系 frame_id = "velodyne"                                     -->
+    <!-- ================================================================== -->
+    <include file="$(find velodyne_pointcloud)/launch/VLP16_points.launch" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 3] 加载 Scout Mini 3D URDF 模型到参数服务器                    -->
+    <!--                                                                     -->
+    <!-- xacro 命令解析 .xacro 文件中的宏变量并展开为纯 URDF XML              -->
+    <!-- 结果存入参数服务器 /robot_description                                -->
+    <!--                                                                     -->
+    <!-- scout_mini.urdf.xacro 内容解析（来自实际源码）：                     -->
+    <!--   base_link: 车体中心，visual origin xyz="0 0 0"                    -->
+    <!--   wheel_vertical_offset = -0.100998（轮轴在 base_link 下方 0.101m） -->
+    <!--   wheel_radius = 0.160m（轮子半径）                                 -->
+    <!--   轮子最低点 = -0.101 - 0.160 = -0.261m（低于 base_link 0.261m）   -->
+    <!--   4 个轮子通过 continuous joint 连接到 base_link                     -->
+    <!--   inertial_link / front_mount / rear_mount 通过 fixed joint 连接    -->
+    <!-- ================================================================== -->
+    <param name="robot_description"
+           command="$(find xacro)/xacro '$(find scout_description)/urdf/scout_mini.urdf.xacro'" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 4] joint_state_publisher                                       -->
+    <!--                                                                     -->
+    <!-- ⚠️ 这是让车轮在 RViz 中渲染的关键节点！                             -->
+    <!--                                                                     -->
+    <!-- 原理：scout_mini.urdf.xacro 中的 4 个车轮关节类型为 continuous      -->
+    <!--   （连续旋转关节），robot_state_publisher 需要知道这些关节的          -->
+    <!--   当前角度才能计算并发布 base_link → wheel_link 的 TF                -->
+    <!--                                                                     -->
+    <!-- 如果底盘驱动已经发布 /joint_states（scout_base_node 会发），          -->
+    <!--   joint_state_publisher 会合并并转发                                 -->
+    <!-- 如果底盘驱动未发布（如离线回放），joint_state_publisher              -->
+    <!--   会自动发布默认的零角度关节状态                                     -->
+    <!--                                                                     -->
+    <!-- 缺少此节点的后果：                                                   -->
+    <!--   robot_state_publisher 收不到 /joint_states                        -->
+    <!--   → 无法计算车轮 TF                                                 -->
+    <!--   → RViz 中 RobotModel 只显示车体，四个车轮消失！                   -->
+    <!-- ================================================================== -->
+    <node name="joint_state_publisher"
+          pkg="joint_state_publisher"
+          type="joint_state_publisher"
+          output="screen" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 5] robot_state_publisher                                       -->
+    <!--                                                                     -->
+    <!-- 功能：                                                               -->
+    <!--   1. 读取 /robot_description 参数中的 URDF 模型                     -->
+    <!--   2. 订阅 /joint_states 话题（来自 joint_state_publisher）           -->
+    <!--   3. 计算并发布所有 URDF 关节对应的 TF：                             -->
+    <!--      base_link → inertial_link (fixed)                              -->
+    <!--      base_link → front_mount (fixed)                                -->
+    <!--      base_link → rear_mount (fixed)                                 -->
+    <!--      base_link → front_right_wheel_link (continuous, 需要 joint_states) -->
+    <!--      base_link → front_left_wheel_link  (continuous)                -->
+    <!--      base_link → rear_right_wheel_link  (continuous)                -->
+    <!--      base_link → rear_left_wheel_link   (continuous)                -->
+    <!--                                                                     -->
+    <!-- publish_frequency 50Hz: 与底盘驱动同频发布 TF                       -->
+    <!-- ================================================================== -->
+    <node name="robot_state_publisher"
+          pkg="robot_state_publisher"
+          type="robot_state_publisher"
+          output="screen">
+        <param name="publish_frequency" value="50.0" />
+    </node>
+
+    <!-- ================================================================== -->
+    <!-- [模块 6] base_link → velodyne 静态 TF                               -->
+    <!--                                                                     -->
+    <!-- ⚠️⚠️⚠️ 生产环境参数——标定完成后，必须将 6 个 0 替换为真实数值 ⚠️⚠️⚠️ -->
+    <!--                                                                     -->
+    <!-- static_transform_publisher 参数格式（tf2_ros 版本）：                -->
+    <!--   args="x y z yaw pitch roll frame_id child_frame_id"               -->
+    <!--   注意旋转参数顺序是 yaw(Z) pitch(Y) roll(X)，即 ZYX 欧拉角        -->
+    <!--                                                                     -->
+    <!-- 当前 "0 0 0 0 0 0" 含义：                                           -->
+    <!--   x=0 y=0 z=0: 雷达与 base_link 平移重合                           -->
+    <!--   yaw=0 pitch=0 roll=0: 雷达与 base_link 旋转重合                   -->
+    <!--                                                                     -->
+    <!-- ★ 这是"全归零零信任标定原则"的体现                                   -->
+    <!-- ★ 标定后（Phase 3）将此处 6 个 0 替换为 rqt_reconfigure 测出的真实值 -->
+    <!-- ================================================================== -->
+    <!-- ★ 标定完成的生产环境参数 -->
+    <!-- args 格式: x y z yaw pitch roll frame_id child_frame_id -->
+    <!-- ⚠️ 注意 tf2_ros static_transform_publisher 的旋转参数顺序是 yaw pitch roll -->
+    <node name="base_link_to_velodyne"
+          pkg="tf2_ros"
+          type="static_transform_publisher"
+          args="0.12 0.00 0.54 0.03 -0.06 0.01 base_link velodyne" />
+</launch>

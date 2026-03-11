@@ -1,0 +1,75 @@
+<!-- filepath: src/scout_nav/launch/calibrate_extrinsics.launch -->
+<!-- ====================================================================== -->
+<!-- calibrate_extrinsics.launch — 双阶全归零在线外参标定专用                  -->
+<!--                                                                         -->
+<!-- 标定工作流与 TF 树断裂修复：                                              -->
+<!--   由于 dynamic_tf_broadcaster 需要发布 base_footprint → base_link，     -->
+<!--   为防止 base_link 出现多父节点（导致 TF 树断裂），本 Launch 不直接       -->
+<!--   include 生产环境的 bringup，而是将组件解耦拉起：                       -->
+<!--     1. 拉起底盘驱动，但强制 pub_tf:=false 切断 odom 干扰                 -->
+<!--     2. 丢弃静态外参发布器，完全由动态脚本接管 velodyne 的 TF              -->
+<!--   此时拥有绝对纯净的单链 TF 树：base_footprint → base_link → velodyne   -->
+<!-- ====================================================================== -->
+<launch>
+
+    <!-- 实车标定使用系统时钟 -->
+    <param name="/use_sim_time" value="false" />
+
+    <!-- ================================================================== -->
+    <!--[模块 1] Scout Mini 底盘驱动（⚠️ 关闭 TF 发布）                      -->
+    <!-- 强制 pub_tf:=false，这样 base_link 的父节点就腾出位置给了 base_footprint -->
+    <!-- ================================================================== -->
+    <include file="$(find scout_base)/launch/scout_base.launch">
+        <arg name="port_name"       value="can0" />
+        <arg name="is_scout_mini"   value="true" />
+        <arg name="is_scout_omni"   value="false" />
+        <arg name="simulated_robot" value="false" />
+        <arg name="odom_topic_name" value="odom" />
+        <arg name="pub_tf"          value="false" /> <!-- ★ 核心修复点 -->
+    </include>
+
+    <!-- ================================================================== -->
+    <!-- [模块 2] Velodyne VLP-16 雷达驱动                                    -->
+    <!-- ================================================================== -->
+    <include file="$(find velodyne_pointcloud)/launch/VLP16_points.launch" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 3] 解析并加载 Scout Mini 3D URDF 模型 + 关节 TF 发布            -->
+    <!-- ================================================================== -->
+    <param name="robot_description"
+           command="$(find xacro)/xacro '$(find scout_description)/urdf/scout_mini.urdf.xacro'" />
+
+    <node name="joint_state_publisher"
+          pkg="joint_state_publisher"
+          type="joint_state_publisher"
+          output="screen" />
+
+    <node name="robot_state_publisher"
+          pkg="robot_state_publisher"
+          type="robot_state_publisher"
+          output="screen">
+        <param name="publish_frequency" value="50.0" />
+    </node>
+
+    <!-- ================================================================== -->
+    <!-- [模块 4] ★ 双阶动态 TF 广播器（标定核心引擎）                       -->
+    <!--                                                                     -->
+    <!-- 启动后该节点以 50Hz 广播：                                            -->
+    <!--   - base_footprint → base_link（仅 Z 平移 = base_z_offset）         -->
+    <!--   - base_link → velodyne（完整 6DOF）                               -->
+    <!-- ================================================================== -->
+    <node name="dynamic_tf_broadcaster"
+          pkg="scout_nav"
+          type="dynamic_tf_broadcaster.py"
+          output="screen" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 5] RViz 可视化                                                 -->
+    <!-- 首次启动为空白界面，请手动将 Fixed Frame 设为 base_footprint         -->
+    <!-- ================================================================== -->
+    <node name="rviz"
+          pkg="rviz"
+          type="rviz"
+          output="screen" />
+
+</launch>
