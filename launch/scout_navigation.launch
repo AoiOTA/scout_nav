@@ -1,0 +1,108 @@
+<!-- filepath: src/scout_nav/launch/scout_navigation.launch -->
+<!-- ====================================================================== -->
+<!-- scout_navigation.launch — 导航核心栈 (★ 实车部署专用 ★)                 -->
+<!--                                                                         -->
+<!-- ⚠️ 警告：本 Launch 包含底层驱动与实车 AMCL                               -->
+<!--          严禁在播放 rosbag 时使用本文件，否则会导致 TF 冲突与时钟撕裂！      -->
+<!--                                                                         -->
+<!-- 集成：硬件驱动 + 降维 + 地图加载 + 高精度实车AMCL + move_base 导航框架     -->
+<!-- 支持启动时通过 planner 参数热切换局部规划器（DWA / TEB）                 -->
+<!-- 用法: roslaunch scout_nav scout_navigation.launch planner:=teb          -->
+<!-- ====================================================================== -->
+<launch>
+
+    <!-- ================================================================== -->
+    <!-- [系统防御] 强制设为 false，确保使用真实物理时钟，防止跑包残留污染         -->
+    <!-- ================================================================== -->
+    <param name="/use_sim_time" value="false" />
+
+    <!-- ================================================================== -->
+    <!-- [参数定义]                                                          -->
+    <!-- planner: 局部规划器选择 (teb / dwa)                                 -->
+    <!-- map_file: 默认加载我们之前建好的 lab_map                              -->
+    <!-- ================================================================== -->
+    <arg name="planner"  default="teb" />
+    <arg name="map_file" default="$(find scout_nav)/maps/lab_map.yaml" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 1] 硬件底层全栈拉起 (发 /odom, TF:odom->base_link, /tf_static) -->
+    <!-- ================================================================== -->
+    <include file="$(find scout_nav)/launch/scout_bringup.launch">
+        <arg name="use_sim_time" value="false" />
+    </include>
+
+    <!-- ================================================================== -->
+    <!-- [模块 2] 3D→2D 激光降维 (发 /scan 供 AMCL 和 Costmap 使用)           -->
+    <!-- ================================================================== -->
+    <include file="$(find scout_nav)/launch/scout_lidar_process.launch" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 3] 地图服务器 (发 /map 和静态地图数据)                           -->
+    <!-- ================================================================== -->
+    <node name="map_server"
+          pkg="map_server"
+          type="map_server"
+          args="$(arg map_file)"
+          output="screen" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 4] AMCL 定位 (★ 引入我们刚写好的实车防转弯漂移调优版)             -->
+    <!-- ================================================================== -->
+    <include file="$(find scout_nav)/launch/scout_amcl.launch" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 5] move_base 导航控制中枢                                       -->
+    <!-- ================================================================== -->
+    <node name="move_base"
+          pkg="move_base"
+          type="move_base"
+          respawn="false"
+          output="screen">
+
+        <!-- ============ 1. 加载 Costmap 公共与独立参数 ============ -->
+        <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml"
+                  command="load" ns="global_costmap" />
+        <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml"
+                  command="load" ns="local_costmap" />
+
+        <rosparam file="$(find scout_nav)/param/global_costmap_params.yaml"
+                  command="load" />
+        <rosparam file="$(find scout_nav)/param/local_costmap_params.yaml"
+                  command="load" />
+
+        <!-- ============ 2. 动态加载局部规划器参数 ============ -->
+        <rosparam file="$(find scout_nav)/param/teb_local_planner_params.yaml"
+                  command="load"
+                  if="$(eval planner == 'teb')" />
+        <rosparam file="$(find scout_nav)/param/dwa_local_planner_params.yaml"
+                  command="load"
+                  if="$(eval planner == 'dwa')" />
+
+        <!-- ============ 3. 规划器插件配置 ============ -->
+        <!-- 全局规划器：NavFn (A* 算法) -->
+        <param name="base_global_planner" value="navfn/NavfnROS" />
+
+        <!-- 局部规划器：根据 planner 传入的参数动态选择插件 -->
+        <param name="base_local_planner"
+               value="teb_local_planner/TebLocalPlannerROS"
+               if="$(eval planner == 'teb')" />
+        <param name="base_local_planner"
+               value="dwa_local_planner/DWAPlannerROS"
+               if="$(eval planner == 'dwa')" />
+
+        <!-- ============ 4. move_base 运行频率与控制参数 ============ -->
+        <param name="controller_frequency"       value="10.0" />
+        <param name="planner_frequency"          value="1.0" />
+        <param name="controller_patience"        value="10.0" />
+        <param name="planner_patience"           value="5.0" />
+        <param name="oscillation_timeout"        value="10.0" />
+        <param name="oscillation_distance"       value="0.2" />
+
+        <!-- ============ 5. 脱困行为配置 ============ -->
+        <!-- 滑移转向底盘原地旋转能力极强，允许通过原地旋转清除周围伪影障碍物 -->
+        <param name="clearing_rotation_allowed"  value="true" />
+        <param name="conservative_reset_dist"    value="3.0" />
+
+    </node>
+
+</launch>

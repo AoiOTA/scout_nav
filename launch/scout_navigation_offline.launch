@@ -1,0 +1,96 @@
+<!-- filepath: src/scout_nav/launch/scout_navigation_offline.launch -->
+<!-- ====================================================================== -->
+<!-- scout_navigation_offline.launch — 导航代价地图与全局规划离线调参纯净版   -->
+<!--                                                                         -->
+<!-- ⚠️ 核心防暴走设计：                                                       -->
+<!--   1. 强制 /use_sim_time = true                                            -->
+<!--   2. 绝对剔除底盘驱动与激光降维 (依赖 rosbag 提供 /tf 与 /scan)              -->
+<!--   3. 加载 3D URDF 模型文本，满足 RViz 渲染，绝不抢夺 TF 发布权               -->
+<!--   4. 使用 scout_amcl_offline.launch 提供离线环境下的纯净定位               -->
+<!--                                                                         -->
+<!-- ★ 使用场景：配合 rosbag play -clock -pause 进行 Costmap 参数雕刻       -->
+<!-- ====================================================================== -->
+
+
+<launch>
+
+    <!-- ================================================================== -->
+    <!-- [系统防线] 强制接管全局仿真时间，由 rosbag play -clock 驱动时钟脉搏      -->
+    <!-- ================================================================== -->
+    <param name="/use_sim_time" value="true" />
+
+    <arg name="planner"  default="teb" />
+    <arg name="map_file" default="$(find scout_nav)/maps/lab_map.yaml" />
+
+    <!-- ================================================================== -->
+    <!-- [模型渲染] 仅仅把 3D 模型文字塞进参数服务器供 RViz 读取，绝不启动发布器   -->
+    <!-- ================================================================== -->
+    <param name="robot_description"
+           command="$(find xacro)/xacro '$(find scout_description)/urdf/scout_mini.urdf.xacro'" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 1] 地图服务器 (发 /map 和静态地图数据)                           -->
+    <!-- ================================================================== -->
+    <node name="map_server"
+          pkg="map_server"
+          type="map_server"
+          args="$(arg map_file)"
+          output="screen" />
+
+    <!-- ================================================================== -->
+    <!--[模块 2] AMCL 离线纯净版 (★ 绝对不能用实车版的 amcl.launch)             -->
+    <!-- 依赖 bag 的 /tf 和 /scan 提供 map -> odom 的修正                     -->
+    <!-- ================================================================== -->
+    <include file="$(find scout_nav)/launch/scout_amcl_offline.launch" />
+
+    <!-- ================================================================== -->
+    <!-- [模块 3] move_base 导航控制中枢 (与实车版参数配置完全一致)             -->
+    <!-- 重点调优对象：global_costmap 和 local_costmap 的膨胀半径、衰减系数     -->
+    <!-- ================================================================== -->
+    <node name="move_base"
+          pkg="move_base"
+          type="move_base"
+          respawn="false"
+          output="screen">
+
+        <!-- ============ 1. 加载 Costmap 公共与独立参数 ============ -->
+        <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml"
+                  command="load" ns="global_costmap" />
+        <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml"
+                  command="load" ns="local_costmap" />
+
+        <rosparam file="$(find scout_nav)/param/global_costmap_params.yaml"
+                  command="load" />
+        <rosparam file="$(find scout_nav)/param/local_costmap_params.yaml"
+                  command="load" />
+
+        <!-- ============ 2. 动态加载局部规划器参数 ============ -->
+        <rosparam file="$(find scout_nav)/param/teb_local_planner_params.yaml"
+                  command="load"
+                  if="$(eval planner == 'teb')" />
+        <rosparam file="$(find scout_nav)/param/dwa_local_planner_params.yaml"
+                  command="load"
+                  if="$(eval planner == 'dwa')" />
+
+        <!-- ============ 3. 规划器插件配置 ============ -->
+        <param name="base_global_planner" value="navfn/NavfnROS" />
+        <param name="base_local_planner"
+               value="teb_local_planner/TebLocalPlannerROS"
+               if="$(eval planner == 'teb')" />
+        <param name="base_local_planner"
+               value="dwa_local_planner/DWAPlannerROS"
+               if="$(eval planner == 'dwa')" />
+
+        <!-- ============ 4. move_base 运行频率与控制参数 ============ -->
+        <param name="controller_frequency"       value="10.0" />
+        <param name="planner_frequency"          value="1.0" />
+        <param name="controller_patience"        value="10.0" />
+        <param name="planner_patience"           value="5.0" />
+        <param name="oscillation_timeout"        value="10.0" />
+        <param name="oscillation_distance"       value="0.2" />
+
+        <param name="clearing_rotation_allowed"  value="true" />
+        <param name="conservative_reset_dist"    value="3.0" />
+    </node>
+
+</launch>
