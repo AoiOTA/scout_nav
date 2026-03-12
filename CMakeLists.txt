@@ -37,9 +37,10 @@ catkin_package(
 ## 头文件包含路径
 include_directories(${catkin_INCLUDE_DIRS})
 
-## 安装 Python 脚本
+## ★ 安装 Python 和 Bash 脚本
 catkin_install_python(PROGRAMS
   scripts/dynamic_tf_broadcaster.py
+  scripts/clean_ros_env.sh              # ★ 新增：将其安装到执行目录，方便全局 rosrun
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
