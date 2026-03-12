@@ -1,0 +1,239 @@
+# filepath: src/scout_nav/param/teb_local_planner_params.yaml
+# ============================================================================
+# TEB (Timed Elastic Band) 时间弹性带局部规划器
+#
+# 核心算法原理：
+#   1. 将全局路径离散为一系列带时间戳的"姿态节点" (x, y, θ, Δt)
+#   2. 将这些节点视为"弹性带"，每个节点之间用"弹性"连接
+#   3. 通过 g2o 图优化框架，同时优化：
+#      - 几何约束：轨迹远离障碍物、贴合全局路径
+#      - 运动学约束：速度/加速度不超极值、满足底盘运动模型
+#      - 时间约束：最小化总行驶时间
+#   4. 独有的多拓扑路径探索：同时维护多条拓扑不同的候选路径
+#      （例如障碍物的左绕和右绕），选择代价最低的一条
+#
+# 相比 DWA 的优势：
+#   - 一次规划整条局部路径（而非逐段弧线）→ 更擅长穿越狭窄通道
+#   - 原生支持倒车规划
+#   - 多拓扑探索避免陷入局部最优
+#
+# 适用场景：狭窄走廊、U 型弯、门洞、动态障碍物
+# ============================================================================
+TebLocalPlannerROS:
+
+  # ============================================================================
+  # [1] 轨迹参数
+  # ============================================================================
+
+  # teb_autosize: 是否自动调整时间步长
+  # true: 根据速度/加速度约束自动优化相邻节点的时间间隔
+  teb_autosize: true
+
+  # dt_ref: 参考时间步长（秒）
+  # 轨迹相邻节点之间的目标时间间隔
+  # 0.3s: 以 0.5m/s 行驶时，节点间距约 0.15m
+  dt_ref: 0.3
+
+  # dt_hysteresis: 时间步长迟滞（秒）
+  # 防止步长在 dt_ref 附近频繁振荡
+  dt_hysteresis: 0.1
+
+  # max_samples: 轨迹最大节点数
+  max_samples: 500
+
+  # global_plan_overwrite_orientation: 是否重写全局路径点的朝向
+  # true: TEB 根据运动方向重新计算朝向（全局路径通常不含朝向信息）
+  global_plan_overwrite_orientation: true
+
+  # allow_init_with_backwards_motion: 是否允许以倒车开始
+  # true: 如果倒车代价更低，TEB 会选择倒车方案
+  allow_init_with_backwards_motion: true
+
+  # max_global_plan_lookahead_dist: 全局路径前瞻距离（米）
+  # TEB 只优化全局路径中未来 3m 的部分
+  max_global_plan_lookahead_dist: 3.0
+
+  # global_plan_viapoint_sep: 全局路径上经由点间距（米）
+  # 0.3m: 每 30cm 设一个吸引点，引导 TEB 贴合全局路径
+  global_plan_viapoint_sep: 0.3
+
+  # via_points_ordered: 经由点是否必须按顺序通过
+  # false: 更灵活，允许 TEB 跳过某些经由点
+  via_points_ordered: false
+
+  # ============================================================================
+  # [2] 速度极值（与 DWA 保持一致）
+  # ============================================================================
+
+  # max_vel_x: 最大前进线速度（m/s）
+  max_vel_x: 0.5
+
+  # max_vel_x_backwards: 最大倒车线速度（m/s）
+  # 0.2: 倒车限速（安全优先）
+  max_vel_x_backwards: 0.2
+
+  # max_vel_y: 最大侧向线速度
+  # 0.0: 滑移转向底盘不能侧移
+  max_vel_y: 0.0
+
+  # max_vel_theta: 最大旋转角速度（rad/s）
+  max_vel_theta: 1.0
+
+  # ============================================================================
+  # [3] 加速度限制（与 DWA 保持一致）
+  # ============================================================================
+
+  acc_lim_x: 1.0
+  acc_lim_y: 0.0
+  acc_lim_theta: 2.0
+
+  # ============================================================================
+  # [4] 运动学约束（⚠️ 适配滑移转向底盘的关键 ⚠️）
+  # ============================================================================
+
+  # min_turning_radius: 最小转弯半径（米）
+  # ⚠️⚠️⚠️ 滑移转向底盘的核心参数 ⚠️⚠️⚠️
+  # 0.0: 滑移转向底盘可以原地旋转（转弯半径 = 0）
+  #       旋转中心与车体几何中心严格重合
+  # 如果设为非零值，TEB 会禁止急转弯（仅 Ackermann 底盘需要非零值）
+  min_turning_radius: 0.0
+
+  # wheelbase: 轴距（米）
+  # Scout Mini 轴距 451mm = 0.451m
+  # 对滑移转向底盘此参数不影响运动学（因为不是 Ackermann 转向）
+  # 但 TEB 内部仍需要一个值
+  wheelbase: 0.451
+
+  # cmd_angle_instead_rotvel: 是否发送转向角而非角速度
+  # false: 发送角速度 cmd_vel.angular.z（滑移转向底盘用角速度控制）
+  # true: 发送转向角（仅 Ackermann 底盘）
+  cmd_angle_instead_rotvel: false
+
+  # ============================================================================
+  # [5] 目标容忍度
+  # ============================================================================
+
+  xy_goal_tolerance: 0.15
+  yaw_goal_tolerance: 0.2
+
+  # free_goal_vel: 到达目标时是否允许非零速度
+  # false: 必须停稳
+  free_goal_vel: false
+
+  # ============================================================================
+  # [6] 障碍物参数
+  # ============================================================================
+
+  # min_obstacle_dist: 轨迹与障碍物的最小允许距离（米）
+  # 0.30: 约等于车体半宽（0.29m），TEB 会用完整 footprint 做精确碰撞检测
+  # 此值只是初步筛选阈值
+  min_obstacle_dist: 0.30
+
+  # inflation_dist: 障碍物软约束膨胀距离（米）
+  # 轨迹进入此区域受额外代价惩罚但不被禁止
+  inflation_dist: 0.5
+
+  # include_costmap_obstacles: 是否从局部代价地图读取障碍物
+  include_costmap_obstacles: true
+
+  # costmap_obstacles_behind_robot_dist: 忽略身后多远的障碍物（米）
+  # 减少不必要的计算
+  costmap_obstacles_behind_robot_dist: 1.5
+
+  # obstacle_poses_affected: 每个障碍物影响的最近路径节点数
+  obstacle_poses_affected: 30
+
+  # costmap_converter_plugin: 代价地图转换器（空=不使用）
+  costmap_converter_plugin: ""
+
+  # ============================================================================
+  # [7] 优化参数
+  # ============================================================================
+
+  # no_inner_iterations: 每轮外部迭代中的内部 g2o 求解步数
+  no_inner_iterations: 5
+
+  # no_outer_iterations: 外部迭代轮数
+  # 总优化步数 = 4 × 5 = 20 步/周期
+  no_outer_iterations: 4
+
+  optimization_activate: true
+  optimization_verbose: false
+
+  # penalty_epsilon: 软约束惩罚缓冲区
+  penalty_epsilon: 0.1
+
+  # weight_max_vel_x: 最大线速度约束权重
+  weight_max_vel_x: 2.0
+
+  # weight_max_vel_theta: 最大角速度约束权重
+  weight_max_vel_theta: 1.0
+
+  # weight_acc_lim_x: 线加速度限制权重
+  weight_acc_lim_x: 1.0
+
+  # weight_acc_lim_theta: 角加速度限制权重
+  weight_acc_lim_theta: 1.0
+
+  # weight_kinematics_nh: 非完整约束权重
+  # 1000: 极大权重→严格禁止侧向运动（滑移转向底盘无法侧移）
+  weight_kinematics_nh: 1000.0
+
+  # weight_kinematics_forward_drive: 前向行驶偏好权重
+  # 1.0: 轻微偏好前进（降低倒车概率）
+  weight_kinematics_forward_drive: 1.0
+
+  # weight_kinematics_turning_radius: 转弯半径约束权重
+  # 0.0: 滑移转向可原地转，无需转弯半径约束
+  weight_kinematics_turning_radius: 0.0
+
+  # weight_optimaltime: 最优时间权重
+  # 1.0: 中等→平衡速度与安全
+  weight_optimaltime: 1.0
+
+  # weight_shortest_path: 最短路径权重
+  weight_shortest_path: 0.0
+
+  # weight_obstacle: 障碍物排斥权重
+  # 100.0: 强烈排斥靠近障碍物的轨迹
+  weight_obstacle: 100.0
+
+  # weight_inflation: 膨胀区域代价权重
+  weight_inflation: 0.2
+
+  # weight_viapoint: 经由点吸引权重
+  weight_viapoint: 1.0
+
+  # weight_adapt_factor: 自适应权重放大因子
+  weight_adapt_factor: 2.0
+
+  # ============================================================================
+  # [8] 多拓扑路径探索（TEB 独有黑科技）
+  # ============================================================================
+
+  # enable_homotopy_class_planning: 启用多拓扑路径
+  # true: 同时探索多条拓扑不同的路径（如左绕/右绕障碍物）
+  enable_homotopy_class_planning: true
+
+  # enable_multithreading: 多线程优化
+  enable_multithreading: true
+
+  # max_number_classes: 最多同时维护的候选路径数
+  max_number_classes: 4
+
+  # selection_cost_hysteresis: 路径选择迟滞
+  # 1.0: 当前路径代价必须明显高于其他路径才切换
+  selection_cost_hysteresis: 1.0
+
+  # selection_prefer_initial_plan: 偏好初始路径权重
+  # 0.95: 强烈偏好与全局路径拓扑一致的路径
+  selection_prefer_initial_plan: 0.95
+
+  # ============================================================================
+  # [9] 足迹模型
+  # ============================================================================
+  # 与 costmap_common_params.yaml 的 footprint 完全一致
+  # ⚠️ 必须保持绝对对称！
+  footprint_model:
+    type: "polygon"
+    vertices: [[-0.306, -0.290], [-0.306, 0.290], [0.306, 0.290], [0.306, -0.290]]
