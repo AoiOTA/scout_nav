@@ -1,1 +1,25 @@
+# ==========================================
+# 🛡️ ROS 全栈工程标准 .gitignore 模板
+# ==========================================
+
+# 1. 绝对禁区：离线数据包与录像
 *.bag
+bags/
+*.pcd
+
+# 2. 编译产物与缓存 (Catkin 垃圾)
+build/
+devel/
+install/
+.catkin_workspace
+CMakeCache.txt
+CMakeFiles/
+*.pyc
+
+# 3. 废弃地图（只追踪核心 lab_map）
+maps/test_*
+maps/fail_*
+
+# 4. 编辑器缓存
+.vscode/
+*.code-workspace
