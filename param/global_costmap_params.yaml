@@ -1,0 +1,56 @@
+# filepath: src/scout_nav/param/global_costmap_params.yaml
+# ============================================================================
+# global_costmap_params.yaml — 全局代价地图参数
+#
+# 覆盖整个已知地图区域，供全局路径规划器 (A*/Dijkstra) 使用
+# 由 static_layer + obstacle_layer + inflation_layer 三层叠加
+# ============================================================================
+global_costmap:
+
+  # 全局坐标系（AMCL 发布 map→odom）
+  global_frame: map
+  robot_base_frame: base_link
+
+  # 更新/发布频率
+  update_frequency: 3.0
+  publish_frequency: 1.0
+
+  # 使用静态地图（来自 map_server）
+  static_map: true
+  rolling_window: false
+
+  # 分辨率
+  resolution: 0.05
+  transform_tolerance: 0.5
+
+  # 代价地图层配置
+  plugins:
+    - {name: static_layer,    type: "costmap_2d::StaticLayer"}
+    - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+
+  static_layer:
+    map_topic: /map
+    subscribe_to_updates: true
+
+  obstacle_layer:
+    observation_sources: scan_source
+    scan_source:
+      topic: /scan
+      sensor_frame: base_link
+      data_type: LaserScan
+      marking: true
+      clearing: true
+      obstacle_range: 5.0
+      raytrace_range: 6.0
+
+  inflation_layer:
+    # inflation_radius: 障碍物膨胀半径（米）
+    # 车体对角线 = sqrt(0.612² + 0.580²) = sqrt(0.3745+0.3364) = sqrt(0.7109) ≈ 0.843m
+    # 对角线半径 = 0.843/2 ≈ 0.422m
+    # 加安全余量 → 0.55m
+    inflation_radius: 0.55
+
+    # cost_scaling_factor: 代价衰减速度
+    # 值越大衰减越快→膨胀区"禁区感"越弱→机器人更敢贴近障碍物
+    cost_scaling_factor: 3.0

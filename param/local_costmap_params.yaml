@@ -1,0 +1,49 @@
+# filepath: src/scout_nav/param/local_costmap_params.yaml
+# ============================================================================
+# local_costmap_params.yaml — 局部代价地图参数
+#
+# 只覆盖机器人周围的滚动窗口，供局部规划器 (DWA/TEB) 使用
+# 由 obstacle_layer + inflation_layer 两层叠加（不需要 static_layer）
+# ============================================================================
+local_costmap:
+
+  # 使用里程计坐标系（局部规划只关注短期运动）
+  global_frame: odom
+  robot_base_frame: base_link
+
+  # 更新频率（局部避障需要更高实时性）
+  update_frequency: 5.0
+  publish_frequency: 3.0
+
+  # 滚动窗口（不基于静态地图）
+  static_map: false
+  rolling_window: true
+
+  # 窗口大小 6m × 6m（前后左右各 3m）
+  width: 6.0
+  height: 6.0
+
+  resolution: 0.05
+  transform_tolerance: 0.5
+
+  # 代价地图层
+  plugins:
+    - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+
+  obstacle_layer:
+    observation_sources: scan_source
+    scan_source:
+      topic: /scan
+      sensor_frame: base_link
+      data_type: LaserScan
+      marking: true
+      clearing: true
+      obstacle_range: 5.0
+      raytrace_range: 6.0
+
+  inflation_layer:
+    # 局部膨胀半径比全局更小，允许通过狭窄通道
+    inflation_radius: 0.40
+    # 衰减更快，给局部规划器更多可行轨迹空间
+    cost_scaling_factor: 5.0
