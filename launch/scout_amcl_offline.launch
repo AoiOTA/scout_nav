@@ -1,46 +1,51 @@
 <!-- filepath: src/scout_nav/launch/scout_amcl_offline.launch -->
 <!-- ====================================================================== -->
-<!-- scout_amcl_offline.launch — AMCL 离线 Rosbag 重定位调参纯净版            -->
+<!-- scout_amcl_offline.launch — AMCL 离线重定位 (★ 纯净仿真时钟版 ★)       -->
 <!--                                                                         -->
-<!-- ⚠️ 核心防暴走设计：                                                       -->
-<!--   1. 强制 /use_sim_time = true                                            -->
-<!--   2. 绝对剔除底盘驱动和雷达降维节点（因为 Bag 里已经有了 /scan 和 /tf）      -->
-<!--   3. 只加载 robot_description 满足 RViz 的 3D 渲染，绝不发布干扰 TF       -->
+<!-- 核心功能：                                                               -->
+<!--   配合 rosbag play -clock 使用，绝不启动任何底盘硬件节点。                 -->
+<!--   利用 diff-corrected 算法在离线状态下完美复现高精度定位。                   -->
 <!-- ====================================================================== -->
 <launch>
 
-    <!-- ★ 强制接管全局仿真时间 -->
+    <!-- ★ 强制接管全局仿真时间，由 Rosbag 主宰时钟 -->
     <param name="/use_sim_time" value="true" />
 
-    <!-- ★ 仅供 RViz 画车轮，不启动 state_publisher -->
+    <!-- ★ 仅供 RViz 画 3D 小车模型，绝不启动 robot_state_publisher -->
     <param name="robot_description"
            command="$(find xacro)/xacro '$(find scout_description)/urdf/scout_mini.urdf.xacro'" />
 
     <!-- ================================================================== -->
-    <!-- [纯净版] AMCL 定位节点 (加载与实车完全相同的抗漂移参数)                -->
+    <!-- [纯净版] AMCL 定位节点                                               -->
     <!-- ================================================================== -->
     <node name="amcl" pkg="amcl" type="amcl" output="screen">
+        
+        <!-- ★ 显式重映射，确保离线状态下能准确接到包里的雷达和里程计数据 -->
+        <remap from="scan" to="/scan" />
+        <remap from="odom" to="/odom" />
+
         <param name="min_particles"          value="500" />
         <param name="max_particles"          value="5000" />
         <param name="kld_err"                value="0.05" />
         <param name="kld_z"                  value="0.99" />
         
-        <param name="odom_model_type"        value="diff" />
-        <param name="odom_alpha1"            value="0.8" /> <!-- ★ 防漂核心 -->
+        <!-- ★ 数学修正版差速模型，滑移底盘的救星 -->
+        <param name="odom_model_type"        value="diff-corrected" />
+        <param name="odom_alpha1"            value="0.8" />
         <param name="odom_alpha2"            value="0.2" />
         <param name="odom_alpha3"            value="0.2" />
-        <param name="odom_alpha4"            value="0.5" /> <!-- ★ 防漂核心 -->
+        <param name="odom_alpha4"            value="0.5" />
 
         <param name="laser_model_type"       value="likelihood_field" />
         <param name="laser_max_beams"        value="60" />
         <param name="laser_max_range"        value="30.0" />
         <param name="laser_z_hit"            value="0.95" />
         <param name="laser_z_rand"           value="0.05" />
-        <param name="laser_sigma_hit"        value="0.1" />  <!-- ★ 雷达严丝合缝 -->
+        <param name="laser_sigma_hit"        value="0.1" /> 
         <param name="laser_likelihood_max_dist" value="2.0" />
 
         <param name="update_min_d"           value="0.1" />
-        <param name="update_min_a"           value="0.05" /> <!-- ★ 转弯疯狂更新 -->
+        <param name="update_min_a"           value="0.05" />
         <param name="resample_interval"      value="1" />
         
         <param name="recovery_alpha_slow"    value="0.001" />
@@ -50,6 +55,18 @@
         <param name="base_frame_id"          value="base_link" />
         <param name="global_frame_id"        value="map" />
         <param name="tf_broadcast"           value="true" />
+        
+        <!-- ★ 离线时尤为重要的宽容度，防止离线运算跟不上发包速度导致报错 -->
+        <param name="transform_tolerance"    value="0.5" />
         <param name="gui_publish_rate"       value="5.0" />
+
+        <!-- ============ 初始位姿 (离线版) ============ -->
+        <param name="initial_pose_x"         value="0.0" />
+        <param name="initial_pose_y"         value="0.0" />
+        <param name="initial_pose_a"         value="0.0" />
+        <param name="initial_cov_xx"         value="0.25" />
+        <param name="initial_cov_yy"         value="0.25" />
+        <param name="initial_cov_aa"         value="0.06" />
     </node>
+
 </launch>

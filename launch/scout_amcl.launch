@@ -1,84 +1,74 @@
 <!-- filepath: src/scout_nav/launch/scout_amcl.launch -->
 <!-- ====================================================================== -->
-<!-- scout_amcl.launch — AMCL 自适应蒙特卡洛定位 (★ 实车极限防漂移版 ★)       -->
+<!-- scout_amcl.launch — AMCL 自适应蒙特卡洛定位 (★ 实车在线终极稳定版 ★)   -->
 <!--                                                                         -->
-<!-- ⚠️ 警告：本 Launch 严禁在 rosbag 回放时使用，实车专用！                     -->
-<!--                                                                         -->
-<!-- AMCL 核心原理：                                                         -->
-<!--   在已知地图中用大量"粒子"表示机器人可能的位姿分布                       -->
-<!--   运动时：按运动模型+噪声预测每个粒子的新位姿                            -->
-<!--   观测时：用激光扫描与地图匹配计算每个粒子的权重（似然）                  -->
-<!--   AMCL 最终发布 TF: map → odom（修正里程计的累积漂移）                  -->
+<!-- 核心调优：                                                               -->
+<!--   1. 采用 diff-corrected 数学修正模型，完美适配高噪声环境                  -->
+<!--   2. 针对 Scout Mini 滑移底盘，极限放宽旋转里程计信任度 (alpha1=0.8)       -->
+<!--   3. 加入初始位姿配置与 TF 时间容忍度防断连保护                            -->
 <!-- ====================================================================== -->
 <launch>
 
-    <node name="amcl"
-          pkg="amcl"
-          type="amcl"
-          output="screen">
+    <node name="amcl" pkg="amcl" type="amcl" output="screen">
 
-        <!-- ============ [1] 粒子滤波器参数 ============ -->
+        <!-- ============ [1] 粒子滤波器核心参数 ============ -->
         <param name="min_particles"          value="500" />
         <param name="max_particles"          value="5000" />
         <param name="kld_err"                value="0.05" />
         <param name="kld_z"                  value="0.99" />
 
-        <!-- ============ [2] ★ 运动模型极端调优 (防转弯发散核心) ★ ============ -->
-        <!-- odom_model_type: ROS1 只有差速(diff)和全向(omni)，没有滑移转向模型 -->
-        <param name="odom_model_type"        value="diff" />
+        <!-- ============ [2] ★ 运动模型极端调优 (破案核心) ★ ============ -->
+        <!-- ⚠️ 绝不能用普通的 diff，必须用数学公式严谨的 diff-corrected -->
+        <!-- 只有在这个模型下，下面的高噪声参数才能被正确地转换成粒子的扇形分布 -->
+        <param name="odom_model_type"        value="diff-corrected" />
 
-        <!-- odom_alpha1: 旋转导致的旋转噪声 (rad/rad) -->
-        <!-- ★ 极限修正：从 0.2 暴增至 0.8！彻底告诉 AMCL，底盘给的旋转数据极度不可靠！ -->
+        <!-- odom_alpha1: 旋转导致的旋转噪声 (rad/rad) - 极度打滑，设为 0.8 -->
         <param name="odom_alpha1"            value="0.8" />
-
         <!-- odom_alpha2: 平移导致的旋转噪声 (m/rad) -->
-        <!-- 直行时 Scout Mini 较稳，保持 0.2 -->
         <param name="odom_alpha2"            value="0.2" />
-
         <!-- odom_alpha3: 平移导致的平移噪声 (m/m) -->
-        <!-- 直行时车轮不易打滑，保持 0.2 -->
         <param name="odom_alpha3"            value="0.2" />
-
-        <!-- odom_alpha4: 旋转导致的平移噪声 (rad/m) -->
-        <!-- ★ 极限修正：从 0.2 增至 0.5！转弯时不仅角度不准，还会产生意料之外的侧滑平移 -->
+        <!-- odom_alpha4: 旋转导致的平移噪声 (rad/m) - 侧滑平移，设为 0.5 -->
         <param name="odom_alpha4"            value="0.5" />
 
-        <!-- ============ [3] ★ 激光模型参数 (增强雷达话语权) ★ ============ -->
+        <!-- ============ [3] 激光模型参数 (增强雷达话语权) ============ -->
         <param name="laser_model_type"       value="likelihood_field" />
         <param name="laser_max_beams"        value="60" />
         <param name="laser_max_range"        value="30.0" />
-
-        <!-- 提高匹配命中的权重，让雷达拥有一票否决权 -->
         <param name="laser_z_hit"            value="0.95" />
         <param name="laser_z_rand"           value="0.05" />
-
-        <!-- laser_sigma_hit: 似然场高斯标准差（米） -->
-        <!-- ★ 极限修正：从 0.2 缩小至 0.1。缩小容忍度，要求雷达点云和地图墙壁匹配得更严丝合缝 -->
+        <!-- 严丝合缝的雷达匹配容差 -->
         <param name="laser_sigma_hit"        value="0.1" />
-
         <param name="laser_likelihood_max_dist" value="2.0" />
 
-        <!-- ============ [4] ★ 更新频率极限调优 (解决转弯丢定位) ★ ============ -->
-        <!-- update_min_d: 移动多少米触发一次定位更新 -->
+        <!-- ============ [4] 更新频率极限调优 (防转弯发散) ============ -->
         <param name="update_min_d"           value="0.1" />
-
-        <!-- update_min_a: 旋转多少弧度触发一次定位更新 -->
-        <!-- ★ 极限修正：从 0.2 猛降至 0.05（约 2.8 度）！ -->
-        <!-- 原理：以前转了 11 度才拿雷达纠正一次，误差早就上天了。现在转弯时疯狂高频纠正！ -->
+        <!-- 转弯仅约 2.8 度就强制用雷达纠正一次，死死咬住地图 -->
         <param name="update_min_a"           value="0.05" />
-
-        <!-- ============ [5] 重采样与恢复 ============ -->
         <param name="resample_interval"      value="1" />
+
+        <!-- ============ [5] 绑架恢复参数 ============ -->
         <param name="recovery_alpha_slow"    value="0.001" />
         <param name="recovery_alpha_fast"    value="0.1" />
 
-        <!-- ============ [6] 坐标系配置 ============ -->
+        <!-- ============[6] 坐标系配置与容忍度 ============ -->
         <param name="odom_frame_id"          value="odom" />
         <param name="base_frame_id"          value="base_link" />
         <param name="global_frame_id"        value="map" />
-
+        <!-- 允许 TF 时间戳有 0.5 秒的误差，防止 Lookup into the future 报错崩溃 -->
+        <param name="transform_tolerance"    value="0.5" />
         <param name="tf_broadcast"           value="true" />
         <param name="gui_publish_rate"       value="5.0" />
-    </node>
 
+        <!-- ============ [7] 初始位姿 (Initial Pose) ============ -->
+        <!-- 默认在地图原点启动。如果你的实车起点不在原点，可以修改这里，或用 RViz 给定 -->
+        <param name="initial_pose_x"         value="0.0" />
+        <param name="initial_pose_y"         value="0.0" />
+        <param name="initial_pose_a"         value="0.0" /> <!-- 朝向角度，弧度制 -->
+        <!-- 初始协方差：稍微给大一点点，让它启动时多撒点粒子找位置 -->
+        <param name="initial_cov_xx"         value="0.25" />
+        <param name="initial_cov_yy"         value="0.25" />
+        <param name="initial_cov_aa"         value="0.06" />
+
+    </node>
 </launch>
