@@ -30,32 +30,38 @@ TebLocalPlannerROS:
   teb_autosize: true
 
   # dt_ref: 参考时间步长（秒）
-  # 轨迹相邻节点之间的目标时间间隔
-  # 0.3s: 以 0.5m/s 行驶时，节点间距约 0.15m
-  dt_ref: 0.3
+  # ⚠️ 优化：0.3 -> 0.4
+  # 增大时间间隔，减少轨迹点密度，大幅降低计算量，解决卡顿
+  # 0.4s: 以 0.5m/s 行驶时，节点间距约 0.2m
+  dt_ref: 0.4
 
   # dt_hysteresis: 时间步长迟滞（秒）
   # 防止步长在 dt_ref 附近频繁振荡
   dt_hysteresis: 0.1
 
   # max_samples: 轨迹最大节点数
-  max_samples: 500
+  # ⚠️ 优化：500 -> 150
+  # 原500过大导致计算爆炸，150足够覆盖4m前瞻距离，彻底解决控制频率低
+  max_samples: 150
 
   # global_plan_overwrite_orientation: 是否重写全局路径点的朝向
   # true: TEB 根据运动方向重新计算朝向（全局路径通常不含朝向信息）
   global_plan_overwrite_orientation: true
 
   # allow_init_with_backwards_motion: 是否允许以倒车开始
-  # true: 如果倒车代价更低，TEB 会选择倒车方案
-  allow_init_with_backwards_motion: true
+  # ⚠️ 优化：true -> false
+  # 【核心修改】强制禁止初始倒车，从根源解决"频繁倒车"问题
+  allow_init_with_backwards_motion: false
 
   # max_global_plan_lookahead_dist: 全局路径前瞻距离（米）
-  # TEB 只优化全局路径中未来 3m 的部分
-  max_global_plan_lookahead_dist: 3.0
+  # ⚠️ 优化：3.0 -> 4.0
+  # 稍微增大前瞻，让机器人看得更远，提前规划窄道，减少原地犹豫
+  max_global_plan_lookahead_dist: 4.0
 
   # global_plan_viapoint_sep: 全局路径上经由点间距（米）
-  # 0.3m: 每 30cm 设一个吸引点，引导 TEB 贴合全局路径
-  global_plan_viapoint_sep: 0.3
+  # ⚠️ 优化：0.3 -> 0.8
+  # 【核心修改】增大间距，避免对全局路径"盯得太紧"，解决在窄道中来回微调（摇摆）
+  global_plan_viapoint_sep: 0.8
 
   # via_points_ordered: 经由点是否必须按顺序通过
   # false: 更灵活，允许 TEB 跳过某些经由点
@@ -77,7 +83,9 @@ TebLocalPlannerROS:
   max_vel_y: 0.0
 
   # max_vel_theta: 最大旋转角速度（rad/s）
-  max_vel_theta: 1.0
+  # ⚠️ 优化：1.0 -> 1.5
+  # 稍微提高转向速度，让机器人在窄道中调整姿态更果断，减少拖泥带水
+  max_vel_theta: 1.5
 
   # ============================================================================
   # [3] 加速度限制（与 DWA 保持一致）
@@ -85,7 +93,9 @@ TebLocalPlannerROS:
 
   acc_lim_x: 1.0
   acc_lim_y: 0.0
-  acc_lim_theta: 2.0
+  # ⚠️ 优化：2.0 -> 2.5
+  # 提高角加速度响应，让启停和转向更干脆，解决"一顿一顿"的滞后感
+  acc_lim_theta: 2.5
 
   # ============================================================================
   # [4] 运动学约束（⚠️ 适配滑移转向底盘的关键 ⚠️）
@@ -125,13 +135,15 @@ TebLocalPlannerROS:
   # ============================================================================
 
   # min_obstacle_dist: 轨迹与障碍物的最小允许距离（米）
-  # 0.30: 约等于车体半宽（0.29m），TEB 会用完整 footprint 做精确碰撞检测
-  # 此值只是初步筛选阈值
-  min_obstacle_dist: 0.30
+  # ⚠️ 优化：0.30 -> 0.25
+  # 【核心修改】稍微缩小硬约束距离（原0.3约等于车宽，太保守）
+  # 给机器人多5cm空间，避免在窄道中"左右为难"导致停滞
+  min_obstacle_dist: 0.25
 
   # inflation_dist: 障碍物软约束膨胀距离（米）
-  # 轨迹进入此区域受额外代价惩罚但不被禁止
-  inflation_dist: 0.5
+  # ⚠️ 优化：0.5 -> 0.4
+  # 缩小膨胀区，减少不必要的减速和犹豫，让机器人更敢靠近窄道边缘
+  inflation_dist: 0.4
 
   # include_costmap_obstacles: 是否从局部代价地图读取障碍物
   include_costmap_obstacles: true
@@ -151,11 +163,15 @@ TebLocalPlannerROS:
   # ============================================================================
 
   # no_inner_iterations: 每轮外部迭代中的内部 g2o 求解步数
-  no_inner_iterations: 5
+  # ⚠️ 优化：5 -> 4
+  # 减少迭代次数，换取更快的计算速度（牺牲极小精度，换丝滑控制）
+  no_inner_iterations: 4
 
   # no_outer_iterations: 外部迭代轮数
-  # 总优化步数 = 4 × 5 = 20 步/周期
-  no_outer_iterations: 4
+  # ⚠️ 优化：4 -> 3
+  # 【核心修改】总优化步数 = 3 × 4 = 12 步/周期（原20步）
+  # 这是提高控制频率、解决"一顿一顿"最直接的手段
+  no_outer_iterations: 3
 
   optimization_activate: true
   optimization_verbose: false
@@ -180,8 +196,10 @@ TebLocalPlannerROS:
   weight_kinematics_nh: 1000.0
 
   # weight_kinematics_forward_drive: 前向行驶偏好权重
-  # 1.0: 轻微偏好前进（降低倒车概率）
-  weight_kinematics_forward_drive: 1.0
+  # ⚠️ 优化：1.0 -> 200.0
+  # 【核心修改】极大提高前向权重，从"轻微偏好"变为"强制要求"
+  # 彻底解决"遇到点情况就想倒车"的问题
+  weight_kinematics_forward_drive: 200.0
 
   # weight_kinematics_turning_radius: 转弯半径约束权重
   # 0.0: 滑移转向可原地转，无需转弯半径约束
@@ -195,14 +213,18 @@ TebLocalPlannerROS:
   weight_shortest_path: 0.0
 
   # weight_obstacle: 障碍物排斥权重
-  # 100.0: 强烈排斥靠近障碍物的轨迹
-  weight_obstacle: 100.0
+  # ⚠️ 优化：100.0 -> 50.0
+  # 【核心修改】降低障碍物敏感度，从"极度恐惧"变为"保持警惕"
+  # 解决机器人因两边有墙而"吓瘫"、原地摇摆的问题
+  weight_obstacle: 50.0
 
   # weight_inflation: 膨胀区域代价权重
   weight_inflation: 0.2
 
   # weight_viapoint: 经由点吸引权重
-  weight_viapoint: 1.0
+  # ⚠️ 优化：1.0 -> 0.8
+  # 稍微降低对全局路径的粘性，给机器人更多自由空间在窄道中调整
+  weight_viapoint: 0.8
 
   # weight_adapt_factor: 自适应权重放大因子
   weight_adapt_factor: 2.0
@@ -219,15 +241,19 @@ TebLocalPlannerROS:
   enable_multithreading: true
 
   # max_number_classes: 最多同时维护的候选路径数
-  max_number_classes: 4
+  # ⚠️ 优化：4 -> 2
+  # 【核心修改】减少候选路径。原4条会导致机器人在窄道中反复纠结"走左还是走右"
+  # 只保留2条（当前路径+最优备选），减少决策负担，解决原地摇摆
+  max_number_classes: 2
 
   # selection_cost_hysteresis: 路径选择迟滞
   # 1.0: 当前路径代价必须明显高于其他路径才切换
   selection_cost_hysteresis: 1.0
 
   # selection_prefer_initial_plan: 偏好初始路径权重
-  # 0.95: 强烈偏好与全局路径拓扑一致的路径
-  selection_prefer_initial_plan: 0.95
+  # ⚠️ 优化：0.95 -> 0.8
+  # 稍微降低对初始路径的执念，但依然优先跟随全局路径，增加灵活性
+  selection_prefer_initial_plan: 0.8
 
   # ============================================================================
   # [9] 足迹模型
