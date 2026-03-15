@@ -1,7 +1,8 @@
 <!-- filepath: src/scout_nav/launch/scout_auto_nav.launch -->
 <!-- ====================================================================== -->
-<!-- scout_auto_nav.launch — 顶层自主导航一键启动 (★ 实车在线部署专用 ★)      -->
+<!-- scout_auto_nav.launch (★ 实车生产部署专用 ★)                          -->
 <!--                                                                         -->
+<!-- 核心用途：全功能开启，包含 move_base 自动脱困行为，用于最终的自主导航任务。   -->
 <!-- 用法：                                                                   -->
 <!--   roslaunch scout_nav scout_auto_nav.launch                 # 默认 TEB  -->
 <!--   roslaunch scout_nav scout_auto_nav.launch planner:=dwa    # 切换 DWA  -->
@@ -9,10 +10,10 @@
 <launch>
 
     <arg name="planner"  default="teb" />
-    <!-- ★ 修正：默认地图指向我们 Phase 4 实际建好的 lab_map.yaml -->
+    <!-- 默认地图指向我们 Phase 4 实际建好的 lab_map.yaml -->
     <arg name="map_file" default="$(find scout_nav)/maps/lab_map.yaml" />
 
-    <!-- 导航核心栈（实车硬件 + 降维 + 地图 + 实车AMCL + move_base） -->
+    <!-- 导航核心栈生产版（实车硬件 + 降维 + 地图 + 实车AMCL + 开启脱困的move_base） -->
     <include file="$(find scout_nav)/launch/scout_navigation.launch">
         <arg name="planner"  value="$(arg planner)" />
         <arg name="map_file" value="$(arg map_file)" />

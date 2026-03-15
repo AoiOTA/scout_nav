@@ -1,0 +1,27 @@
+<!-- filepath: src/scout_nav/launch/scout_auto_nav_debug.launch -->
+<!-- ====================================================================== -->
+<!-- scout_auto_nav_debug.launch (★ 实车在线遛狗调参专用 ★)                  -->
+<!--                                                                         -->
+<!-- 核心用途：实车运行，但彻底关闭恢复脱困行为。保证调参时“所见即所得”不被打断。  -->
+<!-- 用法：                                                                   -->
+<!--   roslaunch scout_nav scout_auto_nav_debug.launch                       -->
+<!-- ====================================================================== -->
+<launch>
+
+    <arg name="planner"  default="teb" />
+    <arg name="map_file" default="$(find scout_nav)/maps/room.yaml" />
+
+    <!-- 导航核心栈调试版（实车硬件 + 关闭脱困行为的 move_base） -->
+    <include file="$(find scout_nav)/launch/scout_navigation_debug.launch">
+        <arg name="planner"  value="$(arg planner)" />
+        <arg name="map_file" value="$(arg map_file)" />
+    </include>
+
+    <!-- RViz -->
+    <node name="rviz"
+          pkg="rviz"
+          type="rviz"
+          args="-d $(find scout_nav)/rviz/scout_nav.rviz"
+          output="screen" />
+
+</launch>

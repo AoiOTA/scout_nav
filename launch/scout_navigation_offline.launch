@@ -18,16 +18,19 @@
     <arg name="map_file" default="$(find scout_nav)/maps/lab_map.yaml" />
 
     <!-- [模型渲染] 仅塞进参数服务器供 RViz 读取，绝不启动 state_publisher -->
-    <param name="robot_description" command="$(find xacro)/xacro '$(find scout_description)/urdf/scout_mini.urdf.xacro'" />
+    <param name="robot_description"
+           command="$(find xacro)/xacro '$(find scout_description)/urdf/scout_mini.urdf.xacro'" />
 
     <!-- [模块 1] 地图服务器 -->
     <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" output="screen" />
 
-    <!--[模块 2] AMCL 离线纯净版 (内部已重映射处理，解决 TF_REPEATED_DATA 冲突) -->
+    <!-- [模块 2] AMCL 离线纯净版 -->
     <include file="$(find scout_nav)/launch/scout_amcl_offline.launch" />
 
     <!-- [模块 3] move_base 导航控制中枢 (离线屏蔽干扰版) -->
     <node name="move_base" pkg="move_base" type="move_base" respawn="false" output="screen">
+
+        <!-- 1. 加载参数 -->
         <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml" command="load" ns="global_costmap" />
         <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml" command="load" ns="local_costmap" />
         <rosparam file="$(find scout_nav)/param/global_costmap_params.yaml" command="load" />
@@ -35,10 +38,12 @@
         <rosparam file="$(find scout_nav)/param/teb_local_planner_params.yaml" command="load" if="$(eval planner == 'teb')" />
         <rosparam file="$(find scout_nav)/param/dwa_local_planner_params.yaml" command="load" if="$(eval planner == 'dwa')" />
 
+        <!-- 2. 规划器配置 -->
         <param name="base_global_planner" value="navfn/NavfnROS" />
         <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" if="$(eval planner == 'teb')" />
         <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS" if="$(eval planner == 'dwa')" />
 
+        <!-- 3. move_base 核心参数 -->
         <param name="controller_frequency"       value="10.0" />
         <param name="planner_frequency"          value="1.0" />
         <param name="controller_patience"        value="10.0" />
@@ -46,9 +51,13 @@
         <param name="oscillation_timeout"        value="10.0" />
         <param name="oscillation_distance"       value="0.2" />
 
-        <!-- ============ ★ 离线调参核心修改：彻底关闭恢复行为 ★ ============ -->
-        <!-- 关闭后，即使在静帧播放时规划器因参数极端而锁死，也不会清理代价地图， -->
-        <!-- 让你能够安静、持续地在 rqt_reconfigure 中观察紫色代价云雾的变化。 -->
+        <!-- 4. ★ 彻底禁用恢复行为 (调试模式) ★ -->
         <param name="recovery_behavior_enabled"  value="false" />
         <param name="clearing_rotation_allowed"  value="false" />
-        <rosparam param="recovery_behaviors">
+        
+        <!-- ★ 修复语法：正确闭合参数标签 ★ -->
+        <rosparam param="recovery_behaviors">[]</rosparam>
+
+    </node>
+
+</launch>

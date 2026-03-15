@@ -1,6 +1,6 @@
 <!-- filepath: src/scout_nav/launch/scout_auto_nav_offline.launch -->
 <!-- ====================================================================== -->
-<!-- scout_auto_nav_offline.launch — 离线一键调参启动 (★ Rosbag 雕刻专用 ★)  -->
+<!-- scout_auto_nav_offline.launch (★ 离线 Rosbag 雕刻专用 ★)               -->
 <!--                                                                         -->
 <!-- ⚠️ 启动前请确保已执行: rosparam set /use_sim_time true                     -->
 <!-- 用法：                                                                   -->
@@ -12,7 +12,7 @@
     <arg name="planner"  default="teb" />
     <arg name="map_file" default="$(find scout_nav)/maps/lab_map.yaml" />
 
-    <!-- 导航核心栈离线版（无底层驱动，依赖 Bag 提供 TF 和 Scan） -->
+    <!-- 导航核心栈离线版（无底层驱动，依赖 Bag 提供 TF 和 Scan，关闭脱困） -->
     <include file="$(find scout_nav)/launch/scout_navigation_offline.launch">
         <arg name="planner"  value="$(arg planner)" />
         <arg name="map_file" value="$(arg map_file)" />
