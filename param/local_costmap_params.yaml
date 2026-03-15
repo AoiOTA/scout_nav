@@ -44,6 +44,6 @@ local_costmap:
 
   inflation_layer:
     # 局部膨胀半径比全局更小，允许通过狭窄通道
-    inflation_radius: 0.40
+    inflation_radius: 0.25
     # 衰减更快，给局部规划器更多可行轨迹空间
     cost_scaling_factor: 5.0
