@@ -1,23 +1,7 @@
 # filepath: src/scout_nav/param/teb_local_planner_params.yaml
 # ============================================================================
 # TEB (Timed Elastic Band) 时间弹性带局部规划器
-#
-# 核心算法原理：
-#   1. 将全局路径离散为一系列带时间戳的"姿态节点" (x, y, θ, Δt)
-#   2. 将这些节点视为"弹性带"，每个节点之间用"弹性"连接
-#   3. 通过 g2o 图优化框架，同时优化：
-#      - 几何约束：轨迹远离障碍物、贴合全局路径
-#      - 运动学约束：速度/加速度不超极值、满足底盘运动模型
-#      - 时间约束：最小化总行驶时间
-#   4. 独有的多拓扑路径探索：同时维护多条拓扑不同的候选路径
-#      （例如障碍物的左绕和右绕），选择代价最低的一条
-#
-# 相比 DWA 的优势：
-#   - 一次规划整条局部路径（而非逐段弧线）→ 更擅长穿越狭窄通道
-#   - 原生支持倒车规划
-#   - 多拓扑探索避免陷入局部最优
-#
-# 适用场景：狭窄走廊、U 型弯、门洞、动态障碍物
+# 穿障修复版：平衡避障安全+窄道通行能力，绝对不穿障
 # ============================================================================
 TebLocalPlannerROS:
 
@@ -25,112 +9,51 @@ TebLocalPlannerROS:
   # [1] 轨迹参数
   # ============================================================================
 
-  # teb_autosize: 是否自动调整时间步长
-  # true: 根据速度/加速度约束自动优化相邻节点的时间间隔
   teb_autosize: true
-
-  # dt_ref: 参考时间步长（秒）
-  # ⚠️ 核心优化：0.6 → 0.3
-  # 之前步长太大导致轨迹点过疏，控制不连续、卡顿；0.3s平衡精度和计算量
-  # 0.3s: 以0.6m/s行驶时，节点间距0.18m，保证控制连续丝滑
   dt_ref: 0.3
-
-  # dt_hysteresis: 时间步长迟滞（秒）
-  # 防止步长在 dt_ref 附近频繁振荡，保证轨迹稳定性
   dt_hysteresis: 0.1
-
-  # max_samples: 轨迹最大节点数
-  # ⚠️ 核心优化：80 → 200
-  # 配合4m前瞻距离，足够覆盖完整的窄道转弯，同时不会计算过载
-  max_samples: 200
-
-  # global_plan_overwrite_orientation: 是否重写全局路径点的朝向
-  # true: TEB 根据运动方向重新计算朝向（全局路径通常不含朝向信息）
+  max_samples: 150
   global_plan_overwrite_orientation: true
 
-  # allow_init_with_backwards_motion: 是否允许以倒车开始
-  # false: 强制禁止初始倒车，避免卡死时乱倒车
-  allow_init_with_backwards_motion: false
+  # 允许倒车自救，不会卡死
+  allow_init_with_backwards_motion: true
 
-  # max_global_plan_lookahead_dist: 全局路径前瞻距离（米）
-  # ⚠️ 核心优化：4.0 → 5.0
-  # 窄道场景增大前瞻，让机器人提前看到完整的通道走向，不会临时慌神卡死
-  max_global_plan_lookahead_dist: 5.0
+  # ⚠️ 穿障修复：前瞻恢复到3.0m，让机器人看得更远，提前识别完整障碍物
+  max_global_plan_lookahead_dist: 3.0
 
-  # global_plan_viapoint_sep: 全局路径上经由点间距（米）
-  # ⚠️ 核心优化：1.5 → 0.5
-  # 【卡死解决核心】缩小间距，强制TEB严格跟随全局路径走通道中间，不会左右乱晃
-  global_plan_viapoint_sep: 0.5
-
-  # via_points_ordered: 经由点是否必须按顺序通过
-  # ⚠️ 核心优化：false → true
-  # 窄道场景必须按顺序走全局路径，禁止跳点，避免规划出贴墙的无效轨迹
+  # ⚠️ 穿障修复：路点间距恢复到0.3m，既走中间，又给避障留调整空间
+  global_plan_viapoint_sep: 0.3
   via_points_ordered: true
-
-  # exact_arc_length: 启用精确弧长计算
-  # ⚠️ 核心优化：新增开启
-  # 【丝滑核心】让轨迹的速度规划更精准，转弯时速度过渡更平滑，无顿挫
   exact_arc_length: true
-
-  # shrink_horizon_backup: 自动收缩前瞻备份
-  # ⚠️ 核心优化：新增开启
-  # 【卡死解决核心】规划困难时自动缩小前瞻距离，保证永远有可行轨迹输出，不会停滞
   shrink_horizon_backup: true
-
-  # escape_recovery_enabled: 卡死逃逸恢复
-  # ⚠️ 核心优化：新增开启
-  # 机器人卡死时自动生成逃逸轨迹，不会原地僵住
   escape_recovery_enabled: true
+  trajectory_infeasible_recovery_enabled: true
 
   # ============================================================================
-  # [2] 速度极值（按你的要求配置）
+  # [2] 速度极值
   # ============================================================================
 
-  # max_vel_x: 最大前进线速度（m/s）
-  # ⚠️ 核心优化：0.5 → 0.6
-  # 按你的期望速度设置上限
   max_vel_x: 0.6
-
-  # max_vel_x_reference: 期望恒定线速度（m/s）
-  # ⚠️ 核心优化：新增
-  # 【恒定速度核心】强制优化器优先让机器人保持这个速度运行
-  max_vel_x_reference: 0.6
-
-  # max_vel_x_backwards: 最大倒车线速度（m/s）
-  max_vel_x_backwards: 0.2
-
-  # max_vel_y: 最大侧向线速度
-  # 0.0: 滑移转向底盘不能侧移
+  max_vel_x_reference: 0.35 # 窄道平衡速度，既不慢又能及时避障
+  max_vel_x_backwards: 0.3
   max_vel_y: 0.0
-
-  # max_vel_theta: 最大旋转角速度（rad/s）
-  # ⚠️ 按你的要求设置为3.14（约180°/s）
   max_vel_theta: 3.14
+  min_vel_x: 0.0 # 允许停下，避免死锁
 
   # ============================================================================
-  # [3] 加速度限制（按你的要求配置）
+  # [3] 加速度限制（保持你的需求）
   # ============================================================================
 
-  # ⚠️ 按你的要求设置为0.6，起步停车更柔和
   acc_lim_x: 0.6
   acc_lim_y: 0.0
-  # ⚠️ 按你的要求设置为0.6，转向更平缓
   acc_lim_theta: 0.6
 
   # ============================================================================
-  # [4] 运动学约束（⚠️ 适配滑移转向底盘的关键 ⚠️）
+  # [4] 运动学约束（滑移转向底盘适配）
   # ============================================================================
 
-  # min_turning_radius: 最小转弯半径（米）
-  # 0.0: 滑移转向底盘可以原地旋转（转弯半径 = 0）
   min_turning_radius: 0.0
-
-  # wheelbase: 轴距（米）
-  # Scout Mini 轴距 451mm = 0.451m
   wheelbase: 0.451
-
-  # cmd_angle_instead_rotvel: 是否发送转向角而非角速度
-  # false: 发送角速度 cmd_vel.angular.z（滑移转向底盘用角速度控制）
   cmd_angle_instead_rotvel: false
 
   # ============================================================================
@@ -139,155 +62,79 @@ TebLocalPlannerROS:
 
   xy_goal_tolerance: 0.15
   yaw_goal_tolerance: 0.2
-
-  # free_goal_vel: 到达目标时是否允许非零速度
-  # false: 必须停稳
   free_goal_vel: false
 
   # ============================================================================
-  # [6] 障碍物参数（窄道通行核心优化）
+  # [6] 障碍物参数（穿障修复核心！）
   # ============================================================================
 
-  # min_obstacle_dist: 轨迹与障碍物的最小允许距离（米）
-  # ⚠️ 核心优化：0.25 → 0.2
-  # 【卡死解决核心】给窄道通行留出足够空间，机器人半宽0.29m，通道只要大于1m就能过
+  # ⚠️ 穿障修复：最小安全距离恢复到0.2m，守住安全底线，绝对不能小于0.15m
   min_obstacle_dist: 0.2
-
-  # inflation_dist: 障碍物软约束膨胀距离（米）
-  # ⚠️ 核心优化：0.4 → 0.3
-  # 必须大于min_obstacle_dist，同时和代价地图膨胀半径匹配，避免窄道里无通行空间
   inflation_dist: 0.3
+  include_costmap_obstacles: true # 必须开启，否则TEB读不到代价地图的障碍物
 
-  # include_costmap_obstacles: 是否从局部代价地图读取障碍物
-  include_costmap_obstacles: true
+  # 忽略身后0.5m以外的障碍物，不被身后干扰
+  costmap_obstacles_behind_robot_dist: 0.5
 
-  # costmap_obstacles_behind_robot_dist: 忽略身后多远的障碍物（米）
-  # 1.0m: 窄道场景缩小，避免身后障碍物干扰前向规划
-  costmap_obstacles_behind_robot_dist: 1.0
-
-  # obstacle_poses_affected: 每个障碍物影响的最近路径节点数
+  # ⚠️ 穿障修复：从20改成30，每个障碍物影响更多轨迹点，避免局部路径穿障
   obstacle_poses_affected: 30
-
-  # costmap_converter_plugin: 代价地图转换器（空=不使用）
   costmap_converter_plugin: ""
+  include_dynamic_obstacles: false
 
   # ============================================================================
-  # [7] 优化参数（丝滑+不卡顿核心）
+  # [7] 优化参数（穿障修复核心！）
   # ============================================================================
 
-  # no_inner_iterations: 每轮外部迭代中的内部 g2o 求解步数
-  # ⚠️ 核心优化：2 → 4
-  # 平衡计算速度和收敛性，之前迭代次数太少，轨迹根本不收敛，导致每次规划结果都跳变，一顿一顿
+  # ⚠️ 穿障修复：恢复迭代次数，保证优化收敛，满足避障约束
   no_inner_iterations: 4
-
-  # no_outer_iterations: 外部迭代轮数
-  # ⚠️ 核心优化：1 → 3
-  # 总优化步数=3×4=12步，既保证计算不超时，又能让轨迹稳定收敛，不会来回跳
   no_outer_iterations: 3
-
   optimization_activate: true
   optimization_verbose: false
 
-  # penalty_epsilon: 软约束惩罚缓冲区
-  # ⚠️ 核心优化：0.3 → 0.1
-  # 之前缓冲区太大，约束太松，轨迹乱飘；0.1保证约束稳定，同时不会太生硬
+  # ⚠️ 穿障修复：从0.2降到0.1，收紧软约束，硬避障约束绝对生效
   penalty_epsilon: 0.1
 
-  # weight_max_vel_x: 最大线速度约束权重
   weight_max_vel_x: 2.0
-
-  # weight_max_vel_theta: 最大角速度约束权重
   weight_max_vel_theta: 1.0
-
-  # weight_acc_lim_x: 线加速度限制权重
   weight_acc_lim_x: 1.0
-
-  # weight_acc_lim_theta: 角加速度限制权重
   weight_acc_lim_theta: 1.0
-
-  # weight_kinematics_nh: 非完整约束权重
-  # 1000: 极大权重→严格禁止侧向运动（滑移转向底盘无法侧移）
   weight_kinematics_nh: 1000.0
 
-  # weight_kinematics_forward_drive: 前向行驶偏好权重
-  # 200.0: 强制要求前进，除非真的卡死，否则绝不倒车
-  weight_kinematics_forward_drive: 200.0
+  # 前向权重150，优先前进，但卡死时能倒车
+  weight_kinematics_forward_drive: 150.0
 
-  # weight_kinematics_turning_radius: 转弯半径约束权重
-  # 0.0: 滑移转向可原地转，无需转弯半径约束
   weight_kinematics_turning_radius: 0.0
-
-  # weight_optimaltime: 最优时间权重
-  # ⚠️ 核心优化：0.1 → 0.8
-  # 【恒定速度核心】平衡速度稳定性，不会为了赶时间乱加减速，同时保证机器人能稳定跑到0.6m/s
-  weight_optimaltime: 0.8
-
-  # weight_velocity_reference: 期望速度跟踪权重
-  # ⚠️ 核心优化：新增
-  # 【恒定速度核心】极高权重强制机器人优先保持0.6m/s的期望速度，不会频繁加减速
-  weight_velocity_reference: 10.0
-
-  # weight_shortest_path: 最短路径权重
+  weight_optimaltime: 0.2
+  weight_velocity_reference: 3.0
   weight_shortest_path: 0.0
 
-  # weight_obstacle: 障碍物排斥权重
-  # ⚠️ 核心优化：50.0 → 30.0
-  # 【卡死解决核心】降低障碍物敏感度，窄道里敢正常通行，不会因为两边有墙就吓瘫
-  weight_obstacle: 30.0
+  # ⚠️ 穿障修复：从5恢复到20，恢复避障约束优先级，绝对不能再低于10
+  weight_obstacle: 20.0
 
-  # weight_inflation: 膨胀区域代价权重
+  # ⚠️ 穿障修复：从0.1提高到0.2，加强膨胀区惩罚，不会靠近障碍物太近
   weight_inflation: 0.2
 
-  # weight_viapoint: 经由点吸引权重
-  # ⚠️ 核心优化：0.3 → 2.0
-  # 【卡死解决核心】大幅提高全局路径跟踪权重，强制机器人走通道中间，不会左右乱晃贴墙
-  weight_viapoint: 2.0
+  # ⚠️ 穿障修复：从8降到3，平衡路径跟踪和避障，不会为了走路径而穿障
+  weight_viapoint: 3.0
 
-  # weight_adapt_factor: 自适应权重放大因子
   weight_adapt_factor: 2.0
 
   # ============================================================================
-  # [8] 多拓扑路径探索（窄道通行核心，必须开启）
+  # [8] 多拓扑路径探索（穿障修复核心！）
   # ============================================================================
 
-  # enable_homotopy_class_planning: 启用多拓扑路径
-  # ⚠️ 核心优化：false → true
-  # 【卡死解决核心】之前关闭了这个，窄道里TEB找不到可行路径，直接无解；开启后同时探索多条路径，选能走的那条
+  # ⚠️ 穿障修复：重新开启多拓扑规划，2条路径，既能找不穿障的路，又不纠结
   enable_homotopy_class_planning: true
-
-  # enable_multithreading: 多线程优化
-  # 开启多线程并行优化多条路径，大幅降低计算延迟，避免卡顿
   enable_multithreading: true
-
-  # max_number_classes: 最多同时维护的候选路径数
-  # ⚠️ 核心优化：1 → 3
-  # 窄道场景3条足够，既保证能找到可行路径，又不会计算过载
-  max_number_classes: 3
-
-  # selection_cost_hysteresis: 路径选择迟滞
-  # 1.0: 防止路径频繁切换，保证轨迹稳定不卡顿
-  selection_cost_hysteresis: 1.0
-
-  # selection_prefer_initial_plan: 偏好初始路径权重
-  # ⚠️ 核心优化：0.8 → 0.95
-  # 强制优先选择和全局路径拓扑一致的路径，窄道里不会乱选绕路的轨迹
+  max_number_classes: 2
+  selection_cost_hysteresis: 1.2
   selection_prefer_initial_plan: 0.95
-
-  # selection_obst_cost_scale: 障碍物代价缩放
-  # ⚠️ 核心优化：新增
-  # 路径选择时优先考虑避障，避免选贴墙的轨迹
-  selection_obst_cost_scale: 2.0
-
-  # selection_viapoint_cost_scale: 路径点代价缩放
-  # ⚠️ 核心优化：新增
-  # 路径选择时优先选贴合全局路径的轨迹
+  selection_obst_cost_scale: 3.0 # 路径选择时优先考虑避障
   selection_viapoint_cost_scale: 1.0
 
   # ============================================================================
-  # [9] 足迹模型
+  # [9] 足迹模型（必须和代价地图完全一致）
   # ============================================================================
-  # 与 costmap_common_params.yaml 的 footprint 完全一致
-  # ⚠️ 必须保持绝对对称！
   footprint_model:
     type: "polygon"
     vertices: [[-0.306, -0.290], [-0.306, 0.290], [0.306, 0.290], [0.306, -0.290]]

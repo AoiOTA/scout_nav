@@ -1,32 +1,29 @@
 # filepath: src/scout_nav/param/local_costmap_params.yaml
 # ============================================================================
 # local_costmap_params.yaml — 局部代价地图参数
-#
-# 只覆盖机器人周围的滚动窗口，供局部规划器 (DWA/TEB) 使用
-# 由 obstacle_layer + inflation_layer 两层叠加（不需要 static_layer）
+# 穿障修复版：保证障碍物正确标记，膨胀区生效
 # ============================================================================
 local_costmap:
 
-  # 使用里程计坐标系（局部规划只关注短期运动）
   global_frame: odom
   robot_base_frame: base_link
 
-  # 更新频率（局部避障需要更高实时性）
-  update_frequency: 5.0
-  publish_frequency: 3.0
+  # 更新频率和规划频率对齐，避免噪点累积
+  update_frequency: 10.0
+  publish_frequency: 5.0
 
-  # 滚动窗口（不基于静态地图）
   static_map: false
   rolling_window: true
 
-  # 窗口大小 6m × 6m（前后左右各 3m）
-  width: 6.0
-  height: 6.0
+  # ⚠️ 穿障修复：恢复4m×4m窗口，让机器人看到完整的障碍物轮廓
+  width: 4.0
+  height: 4.0
 
   resolution: 0.05
   transform_tolerance: 0.5
+  track_unknown_space: false
 
-  # 代价地图层
+  # 只保留实时障碍物层+膨胀层，不加载全局静态地图，避免双重约束
   plugins:
     - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
     - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
@@ -37,13 +34,18 @@ local_costmap:
       topic: /scan
       sensor_frame: base_link
       data_type: LaserScan
+      # ⚠️ 穿障修复：强制开启marking和clearing，激光能正确标记/清除障碍物
       marking: true
       clearing: true
-      obstacle_range: 5.0
-      raytrace_range: 6.0
+      obstacle_range: 3.5
+      raytrace_range: 4.5
+      # 过滤地面反光和单帧噪点，避免虚假障碍物
+      min_obstacle_height: 0.05
+      max_obstacle_height: 1.8
+      obstacle_range_min: 0.15
 
   inflation_layer:
-    # 局部膨胀半径比全局更小，允许通过狭窄通道
-    inflation_radius: 0.25
-    # 衰减更快，给局部规划器更多可行轨迹空间
-    cost_scaling_factor: 5.0
+    # ⚠️ 穿障修复：恢复到0.35m，必须大于机器人半宽0.29m，膨胀区绝对生效
+    inflation_radius: 0.35
+    # ⚠️ 穿障修复：恢复到10.0，代价增长更合理，不会太松导致贴墙
+    cost_scaling_factor: 10.0

@@ -74,10 +74,12 @@ scan_source:
   marking: true
   # 用此数据清除障碍物（激光穿过区域→代价值0）
   clearing: true
-  # 障碍物检测最大距离（5m 内的障碍物参与代价地图）
-  obstacle_range: 5.0
-  # 射线追踪清除最大距离（6m 内的区域可被清除）
-  raytrace_range: 6.0
+  # ⚠️ 窄道优化：缩小检测范围，减少无效计算和地面噪点干扰
+  obstacle_range: 3.0
+  raytrace_range: 3.5
+  # ⚠️ 窄道优化：新增，过滤地面反光/噪点，避免把地面当成障碍物
+  min_obstacle_height: 0.05
+  max_obstacle_height: 2.0
 
 # ============================================================================
 # [3] 基础参数
