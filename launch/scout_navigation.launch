@@ -15,7 +15,7 @@
     <arg name="planner"  default="teb" />
     <arg name="map_file" default="$(find scout_nav)/maps/lab_map.yaml" />
 
-    <!-- [模块 1] 硬件底层全栈拉起 (发 /odom, TF:odom->base_link, /tf_static) -->
+    <!--[模块 1] 硬件底层全栈拉起 (发 /odom, TF:odom->base_link, /tf_static) -->
     <include file="$(find scout_nav)/launch/scout_bringup.launch">
         <arg name="use_sim_time" value="false" />
     </include>
@@ -35,10 +35,16 @@
         <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml" command="load" ns="local_costmap" />
         <rosparam file="$(find scout_nav)/param/global_costmap_params.yaml" command="load" />
         <rosparam file="$(find scout_nav)/param/local_costmap_params.yaml" command="load" />
+        
+        <!-- ★ 核心加载：读取 GlobalPlanner (A*) 的专属调优参数 ★ -->
+        <rosparam file="$(find scout_nav)/param/global_planner_params.yaml" command="load" />
+        
         <rosparam file="$(find scout_nav)/param/teb_local_planner_params.yaml" command="load" if="$(eval planner == 'teb')" />
         <rosparam file="$(find scout_nav)/param/dwa_local_planner_params.yaml" command="load" if="$(eval planner == 'dwa')" />
 
-        <param name="base_global_planner" value="navfn/NavfnROS" />
+        <!-- ★ 框架替换：全面抛弃 navfn，启用支持 A* 与曲线平滑的 GlobalPlanner ★ -->
+        <param name="base_global_planner" value="global_planner/GlobalPlanner" />
+        
         <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" if="$(eval planner == 'teb')" />
         <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS" if="$(eval planner == 'dwa')" />
 

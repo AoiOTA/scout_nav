@@ -1,6 +1,9 @@
 <!-- filepath: src/scout_nav/launch/scout_navigation_debug.launch -->
 <!-- ====================================================================== -->
-<!-- scout_navigation_debug.launch (★ 穿障修复安全版 ★)                  -->
+<!-- scout_navigation_debug.launch (★ 实车在线调参专用版 ★)                  -->
+<!--                                                                         -->
+<!-- 核心用途：在真实的物理场地中，一边看着小车一边用 rqt_reconfigure 调参。       -->
+<!-- 防干扰设计：彻底禁用了 move_base 的恢复行为，防止参数调到极限时小车原地乱转撞墙。 -->
 <!-- ====================================================================== -->
 <launch>
 
@@ -8,7 +11,7 @@
     <param name="/use_sim_time" value="false" />
 
     <arg name="planner"  default="teb" />
-    <arg name="map_file" default="$(find scout_nav)/maps/room.yaml" />
+    <arg name="map_file" default="$(find scout_nav)/maps/lab_map.yaml" />
 
     <!-- [模块 1 & 2] 拉起完整的底层硬件与雷达降维 -->
     <include file="$(find scout_nav)/launch/scout_bringup.launch">
@@ -20,34 +23,37 @@
     <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" output="screen" />
     <include file="$(find scout_nav)/launch/scout_amcl.launch" />
 
-    <!-- [模块 5] move_base 导航控制中枢 -->
+    <!-- [模块 5] move_base 导航控制中枢 (★ 调试安全版 ★) -->
     <node name="move_base" pkg="move_base" type="move_base" respawn="false" output="screen">
         <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml" command="load" ns="global_costmap" />
         <rosparam file="$(find scout_nav)/param/costmap_common_params.yaml" command="load" ns="local_costmap" />
         <rosparam file="$(find scout_nav)/param/global_costmap_params.yaml" command="load" />
         <rosparam file="$(find scout_nav)/param/local_costmap_params.yaml" command="load" />
+        
+        <!-- ★ 核心加载：读取 GlobalPlanner (A*) 的专属调优参数 ★ -->
+        <rosparam file="$(find scout_nav)/param/global_planner_params.yaml" command="load" />
+
         <rosparam file="$(find scout_nav)/param/teb_local_planner_params.yaml" command="load" if="$(eval planner == 'teb')" />
         <rosparam file="$(find scout_nav)/param/dwa_local_planner_params.yaml" command="load" if="$(eval planner == 'dwa')" />
 
-        <param name="base_global_planner" value="navfn/NavfnROS" />
+        <!-- ★ 框架替换：全面抛弃 navfn，启用支持 A* 与曲线平滑的 GlobalPlanner ★ -->
+        <param name="base_global_planner" value="global_planner/GlobalPlanner" />
+        
         <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" if="$(eval planner == 'teb')" />
         <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS" if="$(eval planner == 'dwa')" />
 
-        <!-- 控制频率20Hz，保证丝滑 -->
-        <param name="controller_frequency"       value="20.0" />
-        <!-- 规划频率10Hz，保证反应及时 -->
-        <param name="planner_frequency"          value="10.0" />
-        <param name="controller_patience"        value="15.0" />
-        <param name="planner_patience"           value="8.0" />
-        
-        <!-- ⚠️ 穿障修复：恢复合理的震荡检测，避免机器人原地抽搐 -->
-        <param name="oscillation_timeout"        value="30.0" />
-        <param name="oscillation_distance"       value="1.5" />
-        <param name="oscillation_reset_angle"    value="1.5" />
+        <param name="controller_frequency"       value="10.0" />
+        <param name="planner_frequency"          value="1.0" />
+        <param name="controller_patience"        value="10.0" />
+        <param name="planner_patience"           value="5.0" />
+        <param name="oscillation_timeout"        value="10.0" />
+        <param name="oscillation_distance"       value="0.2" />
 
-        <!-- ============ 调试安全设置 ============ -->
+        <!-- ============ ★ 调试核心：彻底封死脱困行为 ★ ============ -->
+        <!-- 防止小车在规划失败时抽风乱转，保证调参时“所见即所得”，确保人员和车辆安全 -->
         <param name="recovery_behavior_enabled"  value="false" />
         <param name="clearing_rotation_allowed"  value="false" />
+        <!-- 显式覆盖并清空恢复行为列表，拔除一切后门 -->
         <rosparam param="recovery_behaviors">[]</rosparam>
     </node>
 </launch>
