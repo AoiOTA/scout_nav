@@ -1,57 +1,54 @@
-# filepath: src/scout_nav/param/global_costmap_params.yaml
 # ============================================================================
-# global_costmap_params.yaml — 全局代价地图参数
-#
-# 覆盖整个已知地图区域，供全局路径规划器 (A*/Dijkstra) 使用
-# 由 static_layer + obstacle_layer + inflation_layer 三层叠加
+# global_costmap_params.yaml — 全局代价地图参数 (静态图专属优化版)
+# 
+# 修改重点：
+# 1. 移除了 obstacle_layer：全局规划将完全无视雷达探测到的实时障碍物，只按静态地图走。
+# 2. 优化了 inflation_layer：通过平滑的代价梯度，配合 GlobalPlanner 的 A* 算法
+#    (use_grid_path: false) 规划出位于通道中心且圆滑的路径。
 # ============================================================================
-global_costmap:
 
-  # 全局坐标系（AMCL 发布 map→odom）
+global_costmap:
+  # --- 坐标系配置 ---
   global_frame: map
   robot_base_frame: base_link
 
-  # 更新/发布频率
-  update_frequency: 3.0
+  # --- 更新频率 ---
+  # 由于只考虑静态地图，更新频率无需太快，节省 CPU
+  update_frequency: 1.0
   publish_frequency: 1.0
 
-  # 使用静态地图（来自 map_server）
-  static_map: true
-  rolling_window: false
+  # --- 地图配置 ---
+  static_map: true      # 必须为 true，使用 map_server 发布的静态地图
+  rolling_window: false # 必须为 false，全局地图是固定大小的
+  resolution: 0.025      # 栅格分辨率 (建议与 gmapping/cartographer 建图时一致)
 
-  # 分辨率
-  resolution: 0.05
-  transform_tolerance: 0.5
-
-  # 代价地图层配置
+  # --- 插件配置 (核心修改点) ---
+  # 彻底删除 "obstacle_layer"，使全局路径规划对行人、移动车辆“视而不见”
   plugins:
     - {name: static_layer,    type: "costmap_2d::StaticLayer"}
-    - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
     - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
 
+  # --- 静态图层配置 ---
   static_layer:
     map_topic: /map
     subscribe_to_updates: true
+    enabled: true
 
-  obstacle_layer:
-    observation_sources: scan_source
-    scan_source:
-      topic: /scan
-      sensor_frame: base_link
-      data_type: LaserScan
-      marking: true
-      clearing: true
-      inf_is_valid: true
-      obstacle_range: 5.0
-      raytrace_range: 6.0
-
+  # --- 膨胀层配置 (决定路径平滑度与避障倾向) ---
   inflation_layer:
-    # ★ 实车量产修改：全局膨胀 U 型谷制造机 ★
-    # inflation_radius: 障碍物膨胀半径（米）
-    # 设为 1.0m，让走廊等狭窄通道完全被膨胀区覆盖，为底层数学梯度铺路。
+    enabled: true
+    
+    # 障碍物膨胀半径（米）
+    # 建议设为机器人半径的 2-3 倍（Scout Mini 建议 0.6m - 0.8m）。
+    # 较大的半径能确保全局路径离墙更远，留出足够的实时避障空间。
     inflation_radius: 0.5
 
-    # cost_scaling_factor: 代价衰减速度
-    # ★ 必须调小！★ 设为 2.0，让膨胀斜坡极其平缓。
-    # 结合 GlobalPlanner，红线会像水流一样自动流向通道的正中间（代价最低谷）。
-    cost_scaling_factor: 10
+    # 代价比例因子 (Cost Scaling Factor)
+    # 【关键】设为 3.0 或更小。
+    # 这个值越小，从障碍物向外的代价衰减越平缓。
+    # 配合 GlobalPlanner 的梯度寻路 (use_grid_path: false)，
+    # A* 会像水流一样自动选择代价最低的“山谷中间”行走，路径会非常平滑。
+    cost_scaling_factor: 5
+
+  # --- 变换容忍度 ---
+  transform_tolerance: 0.5

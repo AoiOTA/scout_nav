@@ -50,4 +50,4 @@ local_costmap:
     
     # ★ 必须调大！★ 设为 8.0。
     # 让代价斜坡非常陡峭，给 TEB 明确的信号："只要没碰到致命内切区，你都可以贴着边缘极限避障"。
-    cost_scaling_factor: 8.0
+    cost_scaling_factor: 10
