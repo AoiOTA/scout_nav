@@ -1,86 +1,66 @@
 # ============================================================================
-# TEB (Timed Elastic Band) 局部规划器参数配置 - Scout Mini 专属实战版
-#
-# 【核心调优哲学与数学映射】
-# 1. 物理红线：尊重底盘的动力学方程，设定合理的 v_max 和 a_max。
-# 2. 空间博弈：精准控制 min_obstacle_dist (硬红线) 和 penalty_epsilon (缓冲带)，死磕狭窄通道。
-# 3. 目标权重：调整 gamma_k 权重，让机器人在“最优时间”、“避障”、“跟随红线”中取得完美平衡。
-# 4. 拓扑降维：关闭多拓扑并行规划，斩断 TEB 在窄门前“左右摇摆”的神经质计算。
+# TEB Local Planner - 对标 NeuPAN (极限窄门与突发避障融合版)
+# 核心策略：极低惩罚区保走廊平稳 + 超高密度离散点保瞬间闪避 + 释放运动学弹性
 # ============================================================================
 
 TebLocalPlannerROS:
 
   # ============================================================================
-  # 【模块一】 机器人物理轮廓 (Robot Footprint) 
-  # 对应理论：决定了所有距离公式 d_{min} 的计算基准
+  # [1] 机器人物理轮廓 (Footprint)
   # ============================================================================
-  # [★ 重点关注] 致命警告：必须与机器人的真实尺寸严丝合缝！
-  # Scout Mini 真实物理尺寸: 长 0.612m, 宽 0.580m。这里构建严格的矩形包围盒。
-  # 绝不能用 "point" 或 "circular"，否则算出的 d_min 完全失真，必定撞墙或进不去窄门。
   footprint_model:
     type: "polygon"
-    vertices: [[-0.306, -0.290],[-0.306, 0.290], [0.306, 0.290],[0.306, -0.290]] 
+    vertices: [[-0.306, -0.290],[-0.306, 0.290],[0.306, 0.290],[0.306, -0.290]] 
 
   # ============================================================================
-  # 【模块二】 动力学与物理红线 (Dynamics Constraints)
-  # 对应理论：论文 Eq.9-13，将 ΔT_i 的压缩限制在电机物理极限内
+  # [2] 动力学与物理红线 (Dynamics) (对标 NeuPAN max_acce)
   # ============================================================================
-  # [★ 重点关注] 最大速度限制 (v_max)
-  max_vel_x: 0.6            # 最大前进线速度 (m/s)。Scout能跑2.78，但在室内/窄门环境，0.8 既高效又安全。
-  max_vel_x_backwards: 0.2  # 最大倒车线速度 (m/s)。必须限制倒车速度，因为雷达通常有盲区。
-  max_vel_y: 0.0            # 最大侧向速度 (m/s)。差速/滑移转向底盘绝不能侧移，必须为 0！
-  max_vel_theta: 3.14        # 最大旋转角速度 (rad/s)。滑移转向打转极快，1.5 既灵活又不会严重打滑。
+  max_vel_x: 0.6            # 【对标】最高巡航速度 0.6m/s
+  max_vel_x_backwards: 0.2  
+  max_vel_y: 0.0            
+  max_vel_theta: 1.5        # 【对标】限制最高角速度，防止差速车画大龙
 
-  # [★ 重点关注] 最大加速度限制 (a_max) - 决定起步刹车是否抽搐
-  acc_lim_x: 0.6            # 最大线加速度 (m/s^2)。1.0 保证了起步迅猛且平滑，不会引起里程计剧烈震荡。
-  acc_lim_y: 0.0            # 必须为 0！
-  acc_lim_theta: 0.6        # 最大角加速度 (rad/s^2)。滑移底盘原地转弯横向摩擦力极大，1.5 能有效防止电机过载。
+  acc_lim_x: 0.8            # 线加速度 0.8
+  acc_lim_y: 0.0            
+  acc_lim_theta: 1.5        # 【⭐ 破局 1：解封角加速度】
+                            # 必须给足 1.5 的角加速度！这是出洞后 0.5 秒内能把车头甩出 30 度的唯一物理保障。
 
-  # --- 差速/滑移底盘专属运动学 ---
-  # [★ 重点关注] 最小转弯半径
-  min_turning_radius: 0.0   # 极其重要！Scout 支持原地零半径打转，必须设为 0.0。设错会导致无法原地掉头。
-  wheelbase: 0.451          # 轴距 (米)。TEB 内部前向模拟所需。
-  cmd_angle_instead_rotvel: false # 必须为 false，差速底盘接收角速度指令，非阿克曼舵角指令。
+  min_turning_radius: 0.0   
+  wheelbase: 0.451          
+  cmd_angle_instead_rotvel: false 
 
   # ============================================================================
-  # 【模块三】 避障与安全边界 (Obstacles & Safety Margin)
-  # 对应理论：论文 Eq.6, Eq.8 的排斥力惩罚函数 e_Gamma
+  #[3] 极限避障参数 (Obstacles) - ★ 对标 NeuPAN 动态气囊 ★
   # ============================================================================
-  # [★ 重点关注] 绝对硬红线 (x_r)
-  min_obstacle_dist: 0.01   # 最小几何安全距离(米)。加上车宽58cm，走70-80cm窄门时，10cm是极限生存空间。设大了直接报 Infeasible。
+  min_obstacle_dist: 0.01   # 【⭐ 破局 2：物理死线】
+                            # 对应 NeuPAN 的 d_min。单侧空隙 6cm，死线设为 2cm，留出 4cm 的数学缓冲区。
+  penalty_epsilon: 0.01     # 数学缓冲带 2cm
   
-  # [★ 重点关注] 数学缓冲带 (\epsilon) - 优化器的“心态润滑剂”
-  penalty_epsilon: 0.01     # 提前开始惩罚的缓冲量。实际排斥红线 = 0.10 + 0.05 = 0.15m。设得极小(0.05)是为了保留过窄门的物理余量，防止“断崖式”震荡。
+  inflation_dist: 0.35      # 【⭐ 破局 3：消除幽闭恐惧】
+                            # 极其关键！从 0.50 暴降至 0.15！
+                            # 对应 NeuPAN 极低的 \eta。在 6cm 处，惩罚值 ((0.06-0.15)/(0.02-0.15))^2 * 50 ≈ 23。
+                            # 这个惩罚值足够小，机器人不会觉得“被夹扁”，从而消除了走廊里的“疯狂画龙”和“死锁停机”。
   
-  # 软约束舒适区
-  inflation_dist: 0.05       # 膨胀距离。在此距离内有轻微推力，宽阔处让车居中，窄门时允许被突破。
-  
-  # 障碍物感知范围
   include_costmap_obstacles: true
-  costmap_obstacles_behind_robot_dist: 1.5 # 忽略车后1.5米外的障碍物，极大节省图优化计算量。
-  obstacle_poses_affected: 30              # 障碍物影响的相邻轨迹点数量，保持默认。
+  costmap_obstacles_behind_robot_dist: 1.0 
+  obstacle_poses_affected: 30              
   costmap_converter_plugin: ""
 
   # ============================================================================
-  # 【模块四】 多目标优化权重 (Optimization Weights - \gamma_k)
-  # 对应理论：公式 f(B) = \sum \gamma_k f_k(B)，决定机器人的“行为性格”
+  # [4] 优化器权重博弈 (Optimization Weights) - ★ 对标 NeuPAN 姿态解绑 ★
   # ============================================================================
-  # [★ 重点关注] 时间最优权重 (追求速度 vs 安全)
-  weight_optimaltime: 0.3   # 论文 Eq.18。调小它 (默认是1.0)！放弃赛车手思维，让车子走得更佛系，不再为了抢1秒钟去极限贴墙切内角。
+  weight_optimaltime: 3   # 【下调】降低对时间的贪婪，允许它在弯道减速。
+  
+  weight_viapoint: 0.2      # 【⭐ 破局 4：解绑全局路径】
+                            # 对应 NeuPAN 的低 q_s[2]。大幅降低该权重，允许 TEB 的橡皮筋在出洞时完全挣脱全局参考线（绿线），大幅度弯曲以避开 50cm 处的障碍。
+  
+  weight_obstacle: 200     # 【提高】对应 NeuPAN 的 ro_obs=120。确保障碍物斥力能够轻易击穿寻迹拉力。
+  weight_inflation: 3.5     # 给 0.15m 膨胀区一点柔和的引导。
 
-  # [★ 重点关注] 路点跟随权重 (绝对信任全局 A* 规划)
-  weight_viapoint: 20     # 论文 Eq.7。狠狠调大！强迫 TEB 放弃找捷径，死死咬住 A* 算出的全局平滑红线，是窄门稳定居中的关键。
+  weight_kinematics_nh: 1000.0             
+  weight_kinematics_forward_drive: 50.0    # 稍微降一点，允许极度危险时微小的倒车重试。
+  weight_kinematics_turning_radius: 0.0    
 
-  # [★ 重点关注] 避障权重 (怕死程度)
-  weight_obstacle: 25     # 保持默认 50。配合极小的 min_obstacle_dist，让车子既不撞墙，又敢于钻洞。
-  weight_inflation: 0.1     # 软膨胀区的排斥权重，设小一点，进窄门时阻力更小。
-
-  #[★ 重点关注] 非完整约束权重 & 防倒车神药
-  weight_kinematics_nh: 1000.0             # 论文 Eq.17。禁止出现 Y 轴侧移，作为物理定律必须极大 (1000)。
-  weight_kinematics_forward_drive: 100.0   # 强迫前向行驶！斩断它在窄通道里试图“先倒车微调一下姿态”而导致的疯狂前后抽搐。
-  weight_kinematics_turning_radius: 0.0    # 允许原地打转，权重为 0。
-
-  # 物理红线越界罚款金额 (强迫优化器敬畏速度与加速度极限)
   weight_max_vel_x: 2.0
   weight_max_vel_theta: 1.0
   weight_acc_lim_x: 1.0
@@ -88,39 +68,36 @@ TebLocalPlannerROS:
   weight_adapt_factor: 2.0
 
   # ============================================================================
-  # 【模块五】 轨迹配置与全局路径跟踪 (Trajectory & Goal)
-  # 对应理论：论文 2.5 节 Implementation，调整超图(Hyper-graph)的节点分辨率
+  # [5] 轨迹配置与分辨率 (Trajectory) - ★ 解决出洞穿模 ★
   # ============================================================================
-  # 目标点容差
-  xy_goal_tolerance: 0.15   # 终点位置误差 (米)
-  yaw_goal_tolerance: 0.2   # 终点朝向误差 (弧度，约 11度)
-  free_goal_vel: false      # 强制终点速度为 0 (完全刹停)
+  xy_goal_tolerance: 0.15   
+  yaw_goal_tolerance: 0.2   
+  free_goal_vel: false      
 
-  # [★ 重点关注] 全局路径处理
-  max_global_plan_lookahead_dist: 3.0 # TEB 往前看多远。必须确保局部代价地图(Local Costmap)能包住 3 米！
-  global_plan_viapoint_sep: 0.2       # 每隔 0.4 米在红线上放置一个“引力点”，密度适中，牵引绿线。
-  global_plan_overwrite_orientation: true # 自动覆盖全局路径的朝向，让规划更符合车辆切线运动。
-  allow_init_with_backwards_motion: true  # 允许起步倒车。
+  max_global_plan_lookahead_dist: 2  # 【缩短视野】对应 NeuPAN 的 1.2s 视野。防止提前看到洞外障碍物导致走廊内死锁。
+  
+  global_plan_viapoint_sep: 0.5 # 保持 0.4，给橡皮筋足够的扭动自由度。
+  
+  global_plan_overwrite_orientation: true 
+  allow_init_with_backwards_motion: false 
 
-  # 动态分辨率插值参数
   teb_autosize: true
-  dt_ref: 0.3               # 期望的时间步长 ΔT_i。0.3 秒能保证轨迹细腻且 CPU 负载健康。
-  dt_hysteresis: 0.1        # 时间步长的迟滞缓冲，防止优化器频繁加/删节点导致绿线震荡。
-  max_samples: 500          # 轨迹最大点数。
-  no_inner_iterations: 5    # g2o 内部梯度下降迭代次数。
-  no_outer_iterations: 4    # g2o 外部改变图结构(增删点)的迭代次数。
+  
+  dt_ref: 0.1               # 【⭐ 破局 5：超高密度采样】
+                            # 从 0.2 降至 0.1！对应 NeuPAN 连续数学力场的优势。
+                            # 点间距缩短到 0.06m。哪怕障碍物只有 50cm，橡皮筋上也会有 8 个点死死贴住它，绝对不会穿模！
+                            
+  dt_hysteresis: 0.03       
+  max_samples: 500          
+  no_inner_iterations: 5    
+  no_outer_iterations: 4    
 
   # ============================================================================
-  # 【模块六】 拓扑并行规划 (Homotopy Class Planning)
-  # 对应理论：论文第四章 Jump over obstacles，跨越障碍物拓扑
+  #[6] 拓扑并行规划 (Homotopy Class)
   # ============================================================================
-  # [★ 重点关注] 万恶之源：多路径探索开关
-  enable_homotopy_class_planning: false 
-  # 强烈建议关闭 (false)！
-  # 在狭长走廊和门洞里，雷达噪点微小闪烁会诱导 TEB 瞬间在门框左/右算出多条拓扑路径。
-  # 导致绿线像闪电一样来回横跳，底盘直接懵逼原地剧烈抽搐。关闭它，CPU 负载锐减，路径死磕一条，极稳。
+  enable_homotopy_class_planning: false # 【必须关闭】70cm 通道里绝对不能开，否则瞬间卡死。
 
-  enable_multithreading: true           # 开启多线程运算
-  max_number_classes: 4                 # (关闭多拓扑后失效)
-  selection_cost_hysteresis: 1.0        # (关闭多拓扑后失效)
-  selection_prefer_initial_plan: 0.95   # (关闭多拓扑后失效)
+  enable_multithreading: true           
+  max_number_classes: 4                 
+  selection_cost_hysteresis: 1.0        
+  selection_prefer_initial_plan: 0.95

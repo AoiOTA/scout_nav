@@ -56,7 +56,7 @@ footprint: [[-0.306, -0.290],[-0.306, 0.290],[0.306, 0.290], [0.306, -0.290]]
 
 # footprint_padding: 足迹外扩安全余量（米）
 # 在矩形轮廓外再加 2cm 安全边距
-footprint_padding: 0.02
+footprint_padding: 0
 
 # ============================================================================
 # [2] 传感器来源配置
@@ -95,4 +95,4 @@ robot_base_frame: base_link
 transform_tolerance: 0.5
 
 # 栅格分辨率（与建图分辨率一致）
-resolution: 0.05
+resolution: 0.025

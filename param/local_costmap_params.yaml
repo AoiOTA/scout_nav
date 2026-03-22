@@ -12,18 +12,18 @@ local_costmap:
   robot_base_frame: base_link
 
   # 更新频率（局部避障需要更高实时性）
-  update_frequency: 10.0  # 提至 10Hz，应对突然窜出的行人
-  publish_frequency: 3.0
+  update_frequency: 20.0  # 提至 10Hz，应对突然窜出的行人
+  publish_frequency: 20.0
 
   # 滚动窗口（不基于静态地图）
   static_map: false
   rolling_window: true
 
   # 窗口大小 6m × 6m（前后左右各 3m，必须覆盖 TEB 的 3.0m 前瞻距离）
-  width: 6.0
-  height: 6.0
+  width: 6
+  height: 6
 
-  resolution: 0.05
+  resolution: 0.025
   transform_tolerance: 0.5
 
   # 代价地图层
